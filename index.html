@@ -1,16 +1,11 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <!-- iOS 桌面圖示 -->
-    <link rel="apple-touch-icon" href="icon.png">
-    <!-- 瀏覽器分頁小圖示 -->
-    <link rel="icon" type="image/png" href="icon.png">
-
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>九州八日賞楓行旅</title>
     
-    <!-- PWA 設定 (新增部分) -->
+    <!-- PWA 設定 -->
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="icon.png">
     <link rel="icon" type="image/png" href="icon.png">
@@ -20,61 +15,130 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-
+    
     <style>
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
         body { background-color: #f8f5f2; -webkit-tap-highlight-color: transparent; }
         .glass-nav {
-            background: rgba(255, 255, 255, 0.9);
+            background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
             border-top: 1px solid rgba(0,0,0,0.05);
         }
         .card-shadow { box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         
-        /* 簡單的淡入動畫 */
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-5px); }
-            to { opacity: 1; transform: translateY(0); }
+        .recording-dot { animation: pulse-red 2s infinite; }
+        @keyframes pulse-red {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
-        .animate-fade-in {
-            animation: fadeIn 0.3s ease-out forwards;
-        }
+        
+        .modal-enter { animation: modalUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        @keyframes modalUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useMemo, useRef } = React;
 
-        // --- 資料設定區 ---
-        
-        // 1. 航班資訊
-        const flightInfo = {
-            outbound: { date: "11/29", flight: "CI-111", time: "08:00 - 11:30", from: "TPE", to: "KMJ" },
-            inbound: { date: "12/06", flight: "CI-112", time: "18:00 - 19:30", from: "KMJ", to: "TPE" }
+        // --- 設定與工具 ---
+        const DB_NAME = 'KyushuTripDB';
+        const STORE_GPS = 'gps_logs';
+        const STORE_PHOTOS = 'photos';
+        const STORE_CUSTOM_SPOTS = 'custom_spots';
+
+        const initDB = () => {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, 2);
+                request.onerror = (event) => console.error("DB Error", event);
+                request.onupgradeneeded = (event) => {
+                    const db = event.target.result;
+                    if (!db.objectStoreNames.contains(STORE_GPS)) db.createObjectStore(STORE_GPS, { keyPath: 'timestamp' });
+                    if (!db.objectStoreNames.contains(STORE_PHOTOS)) db.createObjectStore(STORE_PHOTOS, { keyPath: 'id' });
+                    if (!db.objectStoreNames.contains(STORE_CUSTOM_SPOTS)) db.createObjectStore(STORE_CUSTOM_SPOTS, { keyPath: 'id', autoIncrement: true });
+                };
+                request.onsuccess = (event) => resolve(event.target.result);
+            });
         };
 
-        // 2. 緊急聯絡與重要資訊
-        const emergencyContacts = [
-            { title: "租車公司", phone: "096-123-4567", note: "預約號: #ABC889" },
-            { title: "旅平險", phone: "+886-2-23456789", note: "富邦產險" },
-            { title: "外交部緊急聯絡", phone: "080-1234-5678", note: "福岡辦事處" }
-        ];
+        const dbOps = {
+            saveGPS: async (lat, lng) => {
+                const db = await initDB();
+                db.transaction(STORE_GPS, 'readwrite').objectStore(STORE_GPS).add({ timestamp: Date.now(), lat, lng });
+            },
+            savePhoto: async (id, base64) => {
+                const db = await initDB();
+                db.transaction(STORE_PHOTOS, 'readwrite').objectStore(STORE_PHOTOS).put({ id, image: base64, timestamp: Date.now() });
+            },
+            getPhoto: async (id) => {
+                const db = await initDB();
+                return new Promise(r => {
+                    const req = db.transaction(STORE_PHOTOS, 'readonly').objectStore(STORE_PHOTOS).get(id);
+                    req.onsuccess = () => r(req.result?.image);
+                });
+            },
+            addCustomSpot: async (spot) => {
+                const db = await initDB();
+                return new Promise(r => {
+                    const req = db.transaction(STORE_CUSTOM_SPOTS, 'readwrite').objectStore(STORE_CUSTOM_SPOTS).add(spot);
+                    req.onsuccess = () => r(true);
+                });
+            },
+            getCustomSpots: async () => {
+                const db = await initDB();
+                return new Promise(r => {
+                    const req = db.transaction(STORE_CUSTOM_SPOTS, 'readonly').objectStore(STORE_CUSTOM_SPOTS).getAll();
+                    req.onsuccess = () => r(req.result || []);
+                });
+            }
+        };
 
-        // 3. 詳細行程資料
-        // 新增了 details 欄位，您可以像第一天那樣填入詳細介紹
+        const exportData = async () => {
+            const db = await initDB();
+            const getLogs = (store) => new Promise(r => {
+                const req = db.transaction(store, 'readonly').objectStore(store).getAll();
+                req.onsuccess = () => r(req.result);
+            });
+            const [gps, photos, customSpots] = await Promise.all([
+                getLogs(STORE_GPS), getLogs(STORE_PHOTOS), getLogs(STORE_CUSTOM_SPOTS)
+            ]);
+            const expenses = JSON.parse(localStorage.getItem('trip_expenses') || '[]');
+            const data = { gps, photos, customSpots, expenses, exportTime: new Date().toLocaleString() };
+            const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `kyushu_trip_backup_${new Date().toISOString().slice(0,10)}.json`;
+            a.click();
+        };
+
+        const calculateDistance = (lat1, lon1, lat2, lon2) => {
+            if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            const d = R * c;
+            return d < 1 ? `${Math.round(d * 1000)}m` : `${d.toFixed(1)}km`;
+        };
+
+        // --- 完整行程資料 (整合您的文字描述 + 圖片 + GPS) ---
         const tripData = [
             {
                 day: 1,
                 date: "11/29 (五)",
+                fullDate: "2024-11-29",
                 title: "秋月古城與銀杏",
                 weather: "晴時多雲 15°C",
                 image: "./images/1.jpg",
                 route: "熊本機場 → 太原銀杏 → 秋月城跡",
                 locations: [
-                    { time: "10:00", name: "熊本機場 (KMJ)", desc: "取車出發", type: "transport" },
+                    { time: "10:00", name: "熊本機場 (KMJ)", desc: "取車出發", type: "transport", lat: 32.8372, lng: 130.8569 },
                     { 
                         time: "12:30", 
                         name: "太原銀杏森林", 
@@ -82,6 +146,7 @@
                         type: "spot", 
                         tags: ["必拍", "季節限定"], 
                         link: "https://www.google.com/maps/search/?api=1&query=太原銀杏森林",
+                        lat: 33.2725, lng: 130.6389,
                         details: "位於廣川町的私人銀杏林，只有在秋季紅葉期間才特別對外開放。這裡種植了約80棵低矮的銀杏樹，因為樹高較低，非常適合人像攝影。當落葉鋪滿地面時，就像走在一條金黃色的地毯上，是近年九州IG爆紅的秘境。"
                     },
                     { 
@@ -91,6 +156,7 @@
                         type: "spot", 
                         tags: ["紅葉名所"], 
                         link: "https://www.google.com/maps/search/?api=1&query=大興善寺",
+                        lat: 33.4357, lng: 130.5367,
                         details: "擁有1300年歷史的古老寺廟，位於佐賀與福岡的交界。從山腳下的停車場沿著參道走上去，會經過著名的「127段石階」，兩旁楓紅掩映，是攝影愛好者的最愛。寺後的「契園」種植了500多棵楓樹，與茅草屋頂的本堂相映成趣。"
                     },
                     { 
@@ -100,6 +166,7 @@
                         type: "spot", 
                         tags: ["小京都"], 
                         link: "https://www.google.com/maps/search/?api=1&query=秋月城跡",
+                        lat: 33.4667, lng: 130.6942,
                         details: "被稱為「筑前的小京都」，保留了江戶時代的城下町風貌。必看的是「黑門」，這原本是秋月城的正門，黑色的木造建築在周圍火紅楓葉的襯托下，顯得格外莊嚴美麗。建議可以在附近的茶屋品嚐葛餅。" 
                     },
                 ],
@@ -108,78 +175,84 @@
             {
                 day: 2,
                 date: "11/30 (六)",
+                fullDate: "2024-11-30",
                 title: "福岡繁華巡禮",
                 weather: "多雲 14°C",
                 image: "./images/2.jpg",
                 locations: [
-                    { time: "11:30", name: "天神地下街", desc: "好逛好買", type: "shop", tags: ["伴手禮", "藥妝"], link: "https://www.google.com/maps/search/?api=1&query=天神地下街", details: "九州最大的地下購物中心，全長約600公尺，風格模仿19世紀歐洲街道，石板地與鑄鐵裝飾非常有氣氛。連接了各大百貨公司與地鐵站，集結了流行服飾、雜貨與必買伴手禮（如Bake Cheese Tart、鈴懸等）。" },
-                    { time: "13:30", name: "一蘭拉麵 總本店", desc: "福岡限定方碗", type: "food", tags: ["必吃", "排隊"], link: "https://www.google.com/maps/search/?api=1&query=一蘭拉麵總本店", details: "一蘭拉麵的總部大樓，只有在這裡可以用「方碗（重箱どんぶり）」吃拉麵，非常有儀式感。一樓是屋台風格座位，二樓以上則是經典的味集中座位。" },
-                    { time: "18:00", name: "中洲屋台", desc: "體驗在地夜生活", type: "food", tags: ["關東煮", "明太子"], link: "https://www.google.com/maps/search/?api=1&query=中洲屋台橫丁", details: "那珂川沿岸林立的屋台街是福岡的夜晚象徵。建議點一份博多著名的「明太子玉子燒」配上啤酒。如果不習慣路邊攤，也可以去運河城附近的餐廳。" },
+                    { time: "11:30", name: "天神地下街", desc: "好逛好買", type: "shop", tags: ["伴手禮", "藥妝"], link: "https://www.google.com/maps/search/?api=1&query=天神地下街", lat: 33.5915, lng: 130.3989, details: "九州最大的地下購物中心，全長約600公尺，風格模仿19世紀歐洲街道，石板地與鑄鐵裝飾非常有氣氛。連接了各大百貨公司與地鐵站，集結了流行服飾、雜貨與必買伴手禮（如Bake Cheese Tart、鈴懸等）。" },
+                    { time: "13:30", name: "一蘭拉麵 總本店", desc: "福岡限定方碗", type: "food", tags: ["必吃", "排隊"], link: "https://www.google.com/maps/search/?api=1&query=一蘭拉麵總本店", lat: 33.5932, lng: 130.4046, details: "一蘭拉麵的總部大樓，只有在這裡可以用「方碗（重箱どんぶり）」吃拉麵，非常有儀式感。一樓是屋台風格座位，二樓以上則是經典的味集中座位。" },
+                    { time: "18:00", name: "中洲屋台", desc: "體驗在地夜生活", type: "food", tags: ["關東煮", "明太子"], link: "https://www.google.com/maps/search/?api=1&query=中洲屋台橫丁", lat: 33.5923, lng: 130.4069, details: "那珂川沿岸林立的屋台街是福岡的夜晚象徵。建議點一份博多著名的「明太子玉子燒」配上啤酒。如果不習慣路邊攤，也可以去運河城附近的餐廳。" },
                 ],
                 hotel: { name: "博多 RESOL TRINITY", price: 50000, link: "https://www.google.com/maps/search/?api=1&query=Hotel+Resol+Trinity+Hakata" }
             },
             {
                 day: 3,
                 date: "12/01 (日)",
+                fullDate: "2024-12-01",
                 title: "耶馬溪與別府",
                 weather: "晴天 12°C",
                 image: "./images/3.jpg",
                 locations: [
-                    { time: "11:30", name: "深耶馬溪", desc: "一目八景，奇岩與紅葉", type: "spot", tags: ["絕景"], link: "https://www.google.com/maps/search/?api=1&query=深耶馬溪一目八景", details: "耶馬溪是九州最著名的紅葉峽谷，其中「一目八景」是最精華的展望台，站在這裡可以一眼望盡周圍八座奇形怪狀的岩峰（如群猿山、仙人岩等）。秋季時，灰白的岩石與火紅的楓葉形成強烈對比，景色壯麗。" },
-                    { time: "14:00", name: "富貴寺", desc: "國寶大堂", type: "spot", tags: ["古剎"], link: "https://www.google.com/maps/search/?api=1&query=富貴寺", details: "九州現存最古老的木造建築之一，其「大堂」被指定為日本國寶。建築風格簡樸莊嚴，秋季時大堂周圍會被巨大的銀杏樹與楓葉包圍，金黃與朱紅落葉鋪滿庭院，呈現出極具禪意的平安時代美學。" },
-                    { time: "17:00", name: "別府溫泉", desc: "地獄蒸料理晚餐", type: "relax", tags: ["溫泉"], link: "https://www.google.com/maps/search/?api=1&query=別府溫泉" , details: "日本湧泉量第一的溫泉地，整個城市隨處可見溫泉蒸氣（湯煙）冒出。除了著名的地獄巡禮，這裡的溫泉泉質多樣。您入住的海景溫泉可以一邊泡湯一邊眺望別府灣，是消除長途駕駛疲勞的最佳享受。"},
+                    { time: "11:30", name: "深耶馬溪", desc: "一目八景，奇岩與紅葉", type: "spot", tags: ["絕景"], link: "https://www.google.com/maps/search/?api=1&query=深耶馬溪一目八景", lat: 33.3725, lng: 131.0664, details: "耶馬溪是九州最著名的紅葉峽谷，其中「一目八景」是最精華的展望台，站在這裡可以一眼望盡周圍八座奇形怪狀的岩峰（如群猿山、仙人岩等）。秋季時，灰白的岩石與火紅的楓葉形成強烈對比，景色壯麗。" },
+                    { time: "14:00", name: "富貴寺", desc: "國寶大堂", type: "spot", tags: ["古剎"], link: "https://www.google.com/maps/search/?api=1&query=富貴寺", lat: 33.5414, lng: 131.5283, details: "九州現存最古老的木造建築之一，其「大堂」被指定為日本國寶。建築風格簡樸莊嚴，秋季時大堂周圍會被巨大的銀杏樹與楓葉包圍，金黃與朱紅落葉鋪滿庭院，呈現出極具禪意的平安時代美學。" },
+                    { time: "17:00", name: "別府溫泉", desc: "地獄蒸料理晚餐", type: "relax", tags: ["溫泉"], link: "https://www.google.com/maps/search/?api=1&query=別府溫泉", lat: 33.2800, lng: 131.5000, details: "日本湧泉量第一的溫泉地，整個城市隨處可見溫泉蒸氣（湯煙）冒出。除了著名的地獄巡禮，這裡的溫泉泉質多樣。您入住的海景溫泉可以一邊泡湯一邊眺望別府灣，是消除長途駕駛疲勞的最佳享受。"},
                 ],
                 hotel: { name: "別府 Airbnb", price: 23000, link: "" }
             },
             {
                 day: 4,
                 date: "12/02 (一)",
+                fullDate: "2024-12-02",
                 title: "由布院童話散策",
                 weather: "陰時多雲 11°C",
                 image: "./images/4.jpg",
                 locations: [
-                    { time: "11:00", name: "別府海鮮市場", desc: "午餐吃新鮮海鮮", type: "food", tags: ["海鮮丼"], link: "", details: "位於別府灣旁，提供最新鮮的豐後水道海產。推薦品嚐大分縣特產「關鯖魚」與「關竹莢魚」，肉質緊實鮮甜。也可以選擇海鮮燒烤或豪邁的海鮮丼飯作為午餐。" },
-                    { time: "14:30", name: "湯之坪街道", desc: "史努比茶屋、童話村", type: "walk", tags: ["好逛"], link: "https://www.google.com/maps/search/?api=1&query=湯之坪街道", details: "連接由布院車站與金鱗湖的主要街道，兩旁林立著各式特色小店、雜貨舖與甜點店。必訪的「Yufuin Floral Village」是仿照英國科茨沃爾德打造的童話村，充滿哈利波特般的氛圍，非常適合拍照。" },
-                    { time: "15:00", name: "Milch 起司蛋糕", desc: "必吃熱起司蛋糕", type: "food", tags: ["必吃甜點"], link: "https://www.google.com/maps/search/?api=1&query=Milch由布院", details: "曾獲得世界金賞的甜點名店。招牌「Kase Kuchen」半熟起司蛋糕，有熱吃與冷吃兩種口感。推薦嘗試熱的，用湯匙挖下去，中間濃郁的起司內餡會緩緩流出，奶香濃郁且不膩口。" },
-                    { time: "16:00", name: "金麟湖", desc: "湖上鳥居", type: "spot", tags: ["拍照"], link: "https://www.google.com/maps/search/?api=1&query=金麟湖", details: "由布院的象徵，湖底同時湧出溫泉與清水，因此在秋冬的清晨，湖面會因為溫差飄散著夢幻的白色晨霧（朝霧）。湖畔的「天祖神社」水上鳥居與楓葉倒影，是早起散步才能看到的絕景。"},
+                    { time: "11:00", name: "別府海鮮市場", desc: "午餐吃新鮮海鮮", type: "food", tags: ["海鮮丼"], link: "", lat: 33.3000, lng: 131.5000, details: "位於別府灣旁，提供最新鮮的豐後水道海產。推薦品嚐大分縣特產「關鯖魚」與「關竹莢魚」，肉質緊實鮮甜。也可以選擇海鮮燒烤或豪邁的海鮮丼飯作為午餐。" },
+                    { time: "14:30", name: "湯之坪街道", desc: "史努比茶屋、童話村", type: "walk", tags: ["好逛"], link: "https://www.google.com/maps/search/?api=1&query=湯之坪街道", lat: 33.2667, lng: 131.3583, details: "連接由布院車站與金鱗湖的主要街道，兩旁林立著各式特色小店、雜貨舖與甜點店。必訪的「Yufuin Floral Village」是仿照英國科茨沃爾德打造的童話村，充滿哈利波特般的氛圍，非常適合拍照。" },
+                    { time: "15:00", name: "Milch 起司蛋糕", desc: "必吃熱起司蛋糕", type: "food", tags: ["必吃甜點"], link: "https://www.google.com/maps/search/?api=1&query=Milch由布院", lat: 33.2650, lng: 131.3570, details: "曾獲得世界金賞的甜點名店。招牌「Kase Kuchen」半熟起司蛋糕，有熱吃與冷吃兩種口感。推薦嘗試熱的，用湯匙挖下去，中間濃郁的起司內餡會緩緩流出，奶香濃郁且不膩口。" },
+                    { time: "16:00", name: "金麟湖", desc: "湖上鳥居", type: "spot", tags: ["拍照"], link: "https://www.google.com/maps/search/?api=1&query=金麟湖", lat: 33.2625, lng: 131.3620, details: "由布院的象徵，湖底同時湧出溫泉與清水，因此在秋冬的清晨，湖面會因為溫差飄散著夢幻的白色晨霧（朝霧）。湖畔的「天祖神社」水上鳥居與楓葉倒影，是早起散步才能看到的絕景。"},
                 ],
                 hotel: { name: "由布院 Airbnb", price: 40200, link: "" }
             },
             {
                 day: 5,
                 date: "12/03 (二)",
+                fullDate: "2024-12-03",
                 title: "黑川溫泉秘境",
                 weather: "雨後轉晴 9°C",
                 image: "./images/5.jpg",
                 locations: [
-                    { time: "09:00", name: "B-speak", desc: "排隊買生乳捲", type: "food", tags: ["限量"], link: "https://www.google.com/maps/search/?api=1&query=B-speak", details: "由布院溫泉旅館「山莊 無量塔」開設的蛋糕捲專賣店。堅持不添加人工香料，海綿蛋糕蓬鬆濕潤，鮮奶油甜度適中且清爽。因為非常搶手，通常建議開店前就去排隊，或購買切片裝在車上享用。" },
-                    { time: "12:30", name: "鍋ヶ滝 瀑布", desc: "可進入內部的瀑布", type: "spot", tags: ["秘境"], link: "https://www.google.com/maps/search/?api=1&query=鍋ヶ滝", details: "因茶飲廣告而聲名大噪的景點。最大的特色是可以走到瀑布的「背面」，從水簾後方往外看，陽光穿透水珠與樹林的景色非常夢幻。瀑布寬約20公尺，落差不大但姿態優雅。" },
-                    { time: "14:30", name: "黑川溫泉", desc: "購買入湯手形泡湯", type: "relax", tags: ["米其林二星"], link: "https://www.google.com/maps/search/?api=1&query=黑川溫泉", details: "被米其林綠色指南評為二星的溫泉地。這裡為了維護景觀，全區建築風格統一，充滿濃厚的江戶色彩。利用「入湯手形」可以任選三家旅館的露天溫泉體驗。推薦品嚐溫泉街上的「Patisserie Roku」生乳泡芙，外皮酥脆內餡飽滿。" },
+                    { time: "09:00", name: "B-speak", desc: "排隊買生乳捲", type: "food", tags: ["限量"], link: "https://www.google.com/maps/search/?api=1&query=B-speak", lat: 33.2645, lng: 131.3550, details: "由布院溫泉旅館「山莊 無量塔」開設的蛋糕捲專賣店。堅持不添加人工香料，海綿蛋糕蓬鬆濕潤，鮮奶油甜度適中且清爽。因為非常搶手，通常建議開店前就去排隊，或購買切片裝在車上享用。" },
+                    { time: "12:30", name: "鍋ヶ滝 瀑布", desc: "可進入內部的瀑布", type: "spot", tags: ["秘境"], link: "https://www.google.com/maps/search/?api=1&query=鍋ヶ滝", lat: 33.1167, lng: 131.0250, details: "因茶飲廣告而聲名大噪的景點。最大的特色是可以走到瀑布的「背面」，從水簾後方往外看，陽光穿透水珠與樹林的景色非常夢幻。瀑布寬約20公尺，落差不大但姿態優雅。" },
+                    { time: "14:30", name: "黑川溫泉", desc: "購買入湯手形泡湯", type: "relax", tags: ["米其林二星"], link: "https://www.google.com/maps/search/?api=1&query=黑川溫泉", lat: 33.0783, lng: 131.1394, details: "被米其林綠色指南評為二星的溫泉地。這裡為了維護景觀，全區建築風格統一，充滿濃厚的江戶色彩。利用「入湯手形」可以任選三家旅館的露天溫泉體驗。推薦品嚐溫泉街上的「Patisserie Roku」生乳泡芙，外皮酥脆內餡飽滿。" },
                 ],
                 hotel: { name: "山みず木", price: 105600, link: "https://www.google.com/maps/search/?api=1&query=山みず木" }
             },
             {
                 day: 6,
                 date: "12/04 (三)",
+                fullDate: "2024-12-04",
                 title: "阿蘇火山與神話",
                 weather: "晴朗 8°C",
                 image: "./images/6.jpg",
                 locations: [
-                    { time: "12:30", name: "阿蘇大觀峰", desc: "眺望涅槃像", type: "spot", tags: ["壯觀"], link: "https://www.google.com/maps/search/?api=1&query=阿蘇大觀峰", details: "位於九重連山與阿蘇山之間的高原甜點店。店內招牌是年輪蛋糕與瑞士捲。最棒的是可以在露台座位區，一邊享用精緻甜點，一邊眺望阿蘇五岳的壯闊全景，是自駕途中的最佳休息站。" },
-                    { time: "13:30", name: "草千里", desc: "騎馬體驗", type: "spot", tags: [], link: "https://www.google.com/maps/search/?api=1&query=草千里", details: "位於烏帽子岳北麓的一片巨大圓形草原，原本是火山口遺跡。中央有兩個雨水形成的池塘，可以清楚看到仍在冒煙的中岳火山口。這裡可以體驗騎馬散步，景色開闊壯麗，是阿蘇最具代表性的景點。" },
-                    { time: "16:00", name: "高千穗神社", desc: "夜神樂", type: "spot", tags: ["神話"], link: "https://www.google.com/maps/search/?api=1&query=高千穗神社", details: "約1900年前創建的古老神社，是高千穗鄉八十八社的總社。境內有樹齡超過800年的「秩父杉」與兩棵根部相連的「夫婦杉」，據說牽手繞行三圈能保佑姻緣美滿。每晚這裡也會舉辦演繹神話故事的「夜神樂」。" },
+                    { time: "12:30", name: "阿蘇大觀峰", desc: "眺望涅槃像", type: "spot", tags: ["壯觀"], link: "https://www.google.com/maps/search/?api=1&query=阿蘇大觀峰", lat: 33.0333, lng: 131.0833, details: "位於九重連山與阿蘇山之間的高原甜點店。店內招牌是年輪蛋糕與瑞士捲。最棒的是可以在露台座位區，一邊享用精緻甜點，一邊眺望阿蘇五岳的壯闊全景，是自駕途中的最佳休息站。" },
+                    { time: "13:30", name: "草千里", desc: "騎馬體驗", type: "spot", tags: [], link: "https://www.google.com/maps/search/?api=1&query=草千里", lat: 32.8842, lng: 131.0514, details: "位於烏帽子岳北麓的一片巨大圓形草原，原本是火山口遺跡。中央有兩個雨水形成的池塘，可以清楚看到仍在冒煙的中岳火山口。這裡可以體驗騎馬散步，景色開闊壯麗，是阿蘇最具代表性的景點。" },
+                    { time: "16:00", name: "高千穗神社", desc: "夜神樂", type: "spot", tags: ["神話"], link: "https://www.google.com/maps/search/?api=1&query=高千穗神社", lat: 32.7100, lng: 131.3000, details: "約1900年前創建的古老神社，是高千穗鄉八十八社的總社。境內有樹齡超過800年的「秩父杉」與兩棵根部相連的「夫婦杉」，據說牽手繞行三圈能保佑姻緣美滿。每晚這裡也會舉辦演繹神話故事的「夜神樂」。" },
                 ],
                 hotel: { name: "Hotel Takachiho", price: 65600, link: "https://www.google.com/maps/search/?api=1&query=Hotel+Takachiho" }
             },
             {
                 day: 7,
                 date: "12/05 (四)",
+                fullDate: "2024-12-05",
                 title: "高千穗划船",
                 weather: "多雲 10°C",
                 image: "./images/7.jpg",
                 locations: [
-                    { time: "09:00", name: "高千穗峽", desc: "峽谷划船 (記得預約)", type: "spot", tags: ["必去", "預約"], link: "https://www.google.com/maps/search/?api=1&query=高千穗峽", details: "由阿蘇火山噴發的熔岩急遽冷卻後形成的柱狀節理峽谷。最經典的玩法是划船近距離觀賞「真名井瀑布」，瀑布從17公尺高的峭壁傾瀉而下，水氣與光影交錯，宛如進入神話世界。" },
-                    { time: "12:00", name: "高千穗牛燒肉 和", desc: "頂級和牛午餐", type: "food", tags: ["必吃"], link: "https://www.google.com/maps/search/?api=1&query=高千穗牛燒肉和", details: "曾獲得「日本一」殊榮的高千穗牛，以脂肪分布均勻、口感不油膩著稱。這家餐廳是JA（農會）直營，能以相對實惠的價格吃到最高品質的牛肉。午餐時段的牛排套餐CP值非常高。" },
+                    { time: "09:00", name: "高千穗峽", desc: "峽谷划船 (記得預約)", type: "spot", tags: ["必去", "預約"], link: "https://www.google.com/maps/search/?api=1&query=高千穗峽", lat: 32.7050, lng: 131.3000, details: "由阿蘇火山噴發的熔岩急遽冷卻後形成的柱狀節理峽谷。最經典的玩法是划船近距離觀賞「真名井瀑布」，瀑布從17公尺高的峭壁傾瀉而下，水氣與光影交錯，宛如進入神話世界。" },
+                    { time: "12:00", name: "高千穗牛燒肉 和", desc: "頂級和牛午餐", type: "food", tags: ["必吃"], link: "https://www.google.com/maps/search/?api=1&query=高千穗牛燒肉和", lat: 32.7100, lng: 131.3050, details: "曾獲得「日本一」殊榮的高千穗牛，以脂肪分布均勻、口感不油膩著稱。這家餐廳是JA（農會）直營，能以相對實惠的價格吃到最高品質的牛肉。午餐時段的牛排套餐CP值非常高。" },
                     {
                         time: "15:30",
                         name: "水前寺成趣園",
@@ -187,6 +260,7 @@
                         type: "spot",
                         tags: ["庭園", "散步"],
                         link: "https://www.google.com/maps/search/?api=1&query=水前寺成趣園",
+                        lat: 32.7900, lng: 130.7300,
                         details: "熊本藩主細川家歷經三代建造的桃山式迴遊庭園。庭園設計模仿了東海道五十三次的景色，其中最著名的就是模仿「富士山」的假山。池水引自阿蘇伏流水，清澈見底。秋季時庭園內的楓樹與松樹相互輝映，景色優雅。"
                     },
                     {
@@ -196,6 +270,7 @@
                         type: "spot",
                         tags: ["動漫", "銀杏"],
                         link: "https://www.google.com/maps/search/?api=1&query=熊本縣廳+魯夫像",
+                        lat: 32.7950, lng: 130.7400,
                         details: "位於熊本縣廳散步道上，是為了感謝作者尾田榮一郎對熊本地震復興的貢獻而設立。這尊魯夫銅像還原度極高。秋季造訪時，縣廳前的兩排銀杏大道會變成金黃色，剛好成為魯夫身後最壯觀的背景。"
                     }
                 ],
@@ -204,100 +279,199 @@
              {
                 day: 8,
                 date: "12/06 (五)",
+                fullDate: "2024-12-06",
                 title: "返台",
                 weather: "晴 16°C",
                 image: "./images/8.jpg",
                 locations: [
-                    { time: "11:30", name: "熊本機場", desc: "還車、最後採買", type: "transport", tags: [], link: "https://www.google.com/maps/search/?api=1&query=熊本機場" },
+                    { time: "11:30", name: "熊本機場", desc: "還車、最後採買", type: "transport", tags: [], link: "https://www.google.com/maps/search/?api=1&query=熊本機場", lat: 32.8372, lng: 130.8569 },
                 ],
                 hotel: null
             }
         ];
 
-        // --- 組件開始 ---
+        // --- 組件 ---
+        const Icon = ({ name, size = 18, className }) => <i data-lucide={name} style={{ fontSize: size }} className={className}></i>;
+        const Tag = ({ text }) => <span className={`text-[10px] px-2 py-1 rounded-full font-bold mr-1 bg-gray-100 text-gray-600`}>{text}</span>;
 
-        const Icon = ({ name, size = 18, className }) => {
-            return <i data-lucide={name} style={{ fontSize: size }} className={className}></i>;
-        };
+        // 記帳 Modal (修正日期邏輯)
+        const ExpenseModal = ({ isOpen, onClose, defaultName, defaultDate }) => {
+            const [name, setName] = useState('');
+            const [amount, setAmount] = useState('');
+            const [cat, setCat] = useState('food');
 
-        // 標籤顏色邏輯
-        const Tag = ({ text }) => {
-            let colorClass = "bg-gray-100 text-gray-600";
-            if (["必吃", "必吃甜點"].includes(text)) colorClass = "bg-red-100 text-red-600";
-            if (["必拍", "絕景", "打卡"].includes(text)) colorClass = "bg-purple-100 text-purple-600";
-            if (["伴手禮", "藥妝"].includes(text)) colorClass = "bg-yellow-100 text-yellow-700";
-            if (["預約", "限量"].includes(text)) colorClass = "bg-blue-100 text-blue-600";
-            
-            return <span className={`text-[10px] px-2 py-1 rounded-full font-bold mr-1 ${colorClass}`}>{text}</span>;
-        };
+            useEffect(() => { 
+                if(isOpen && defaultName) setName(defaultName); 
+            }, [isOpen, defaultName]);
 
-        // 獨立的地點卡片組件，處理展開邏輯
-        const LocationCard = ({ loc }) => {
-            const [isExpanded, setIsExpanded] = useState(false);
+            const handleSave = () => {
+                const dateToUse = defaultDate || new Date().toLocaleDateString();
+                const newItem = { 
+                    id: Date.now(), 
+                    name, 
+                    amount: parseInt(amount), 
+                    category: cat, 
+                    date: dateToUse, 
+                    location: defaultName 
+                };
+                const saved = JSON.parse(localStorage.getItem('trip_expenses') || '[]');
+                localStorage.setItem('trip_expenses', JSON.stringify([newItem, ...saved]));
+                onClose();
+                alert(`已記錄於 ${dateToUse}：${name} ¥${amount}`);
+                setName(''); setAmount('');
+            };
+
+            if (!isOpen) return null;
 
             return (
-                <div 
-                    className="bg-white p-4 rounded-2xl card-shadow border border-gray-100 relative overflow-hidden transition-all duration-300"
-                    onClick={() => loc.details && setIsExpanded(!isExpanded)} // 點擊整張卡片也可以展開
-                >
-                    <div className="flex justify-between items-start mb-2">
-                        <div className="flex items-center gap-2">
-                            <div className={`p-1.5 rounded-lg ${loc.type === 'food' ? 'bg-orange-100 text-orange-500' : loc.type === 'spot' ? 'bg-green-100 text-green-500' : 'bg-gray-100 text-gray-500'}`}>
-                                <Icon name={loc.type === 'food' ? 'utensils' : loc.type === 'shop' ? 'shopping-bag' : loc.type === 'transport' ? 'car' : loc.type === 'relax' ? 'coffee' : 'camera'} size={16} />
-                            </div>
-                            <span className="font-mono text-lg font-bold text-gray-800">{loc.time}</span>
+                <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+                    <div className="bg-white w-full max-w-md p-5 rounded-t-3xl sm:rounded-2xl modal-enter shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                <Icon name="wallet" /> 記帳 {defaultDate && <span className="text-sm font-normal text-gray-500">({defaultDate})</span>}
+                            </h3>
+                            <button onClick={onClose}><Icon name="x" /></button>
                         </div>
-                        {loc.link && (
-                            <a 
-                                href={loc.link} 
-                                target="_blank" 
-                                onClick={(e) => e.stopPropagation()} // 防止觸發卡片展開
-                                className="bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 active:scale-95 transition-transform"
-                            >
-                                <Icon name="navigation" size={12} /> 導航
-                            </a>
-                        )}
+                        <input type="text" placeholder="項目" value={name} onChange={e => setName(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-3 text-lg font-bold" />
+                        <input type="number" placeholder="¥ 金額" value={amount} onChange={e => setAmount(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-4 text-lg font-mono" autoFocus />
+                        <div className="flex gap-2 mb-6">
+                            {['food','transport','shop','other'].map(c => (
+                                <button key={c} onClick={() => setCat(c)} className={`flex-1 py-2 rounded-lg text-sm font-bold ${cat===c ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-400'}`}>
+                                    {c==='food'?'餐飲':c==='transport'?'交通':c==='shop'?'購物':'其他'}
+                                </button>
+                            ))}
+                        </div>
+                        <button onClick={handleSave} disabled={!name || !amount} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold text-lg disabled:opacity-50">確認儲存</button>
                     </div>
-                    
-                    <h3 className="text-xl font-bold text-gray-800 mb-1">{loc.name}</h3>
-                    <p className="text-gray-500 text-sm mb-3">{loc.desc}</p>
-                    
-                    <div className="flex justify-between items-end">
-                        <div className="flex flex-wrap gap-1">
-                            {loc.tags && loc.tags.map(tag => <Tag key={tag} text={tag} />)}
-                        </div>
-                        
-                        {/* 只有當有 details 時才顯示展開按鈕 */}
-                        {loc.details && (
-                            <button 
-                                className="text-gray-400 hover:text-[#e85a4f] flex items-center gap-1 text-xs font-medium transition-colors p-1"
-                            >
-                                {isExpanded ? '收起' : '介紹'} 
-                                <Icon name={isExpanded ? "chevron-up" : "chevron-down"} size={14} />
-                            </button>
-                        )}
-                    </div>
-
-                    {/* 展開後的內容 */}
-                    {isExpanded && loc.details && (
-                        <div className="mt-4 pt-4 border-t border-gray-100 animate-fade-in cursor-text" onClick={(e) => e.stopPropagation()}>
-                            <p className="text-sm text-gray-600 leading-relaxed text-justify">
-                                {loc.details}
-                            </p>
-                        </div>
-                    )}
                 </div>
             );
         };
 
-        const TabItinerary = ({ tripData, activeDay, setActiveDay }) => {
+        // 新增景點 Modal (顯示日期提示)
+        const AddSpotModal = ({ isOpen, onClose, dayIndex, dayDate, userLocation, onAdded }) => {
+            const [name, setName] = useState('');
+            const [time, setTime] = useState(() => {
+                const now = new Date();
+                return `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+            });
+
+            const handleSave = async () => {
+                if (!name) return;
+                await dbOps.addCustomSpot({
+                    name, time, type: 'custom', desc: '手動新增景點',
+                    dayIndex, 
+                    lat: userLocation?.lat, lng: userLocation?.lng,
+                    isCustom: true
+                });
+                onAdded();
+                onClose();
+                setName('');
+            };
+
+            if (!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+                    <div className="bg-white w-full max-w-md p-5 rounded-t-3xl sm:rounded-2xl modal-enter shadow-2xl" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-xl font-bold text-gray-800 mb-2">📍 新增中途景點</h3>
+                        <p className="text-sm text-gray-500 mb-4 bg-gray-100 p-2 rounded-lg inline-block">
+                            Day {dayIndex} · {dayDate}
+                        </p>
+                        <input type="time" value={time} onChange={e=>setTime(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-3 font-mono" />
+                        <input type="text" placeholder="景點名稱 (如: 路邊展望台)" value={name} onChange={e=>setName(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-4" autoFocus />
+                        <p className="text-xs text-gray-400 mb-4"><Icon name="map-pin" size={12} className="inline"/> 將自動記錄當前 GPS 位置</p>
+                        <button onClick={handleSave} className="w-full bg-[#e85a4f] text-white py-3 rounded-xl font-bold text-lg">新增至行程</button>
+                    </div>
+                </div>
+            );
+        };
+
+        const LocationCard = ({ loc, userLocation, day, onExpense }) => {
+            const [isExpanded, setIsExpanded] = useState(false);
+            const [photo, setPhoto] = useState(null);
+            
+            useEffect(() => {
+                const checkPhoto = async () => {
+                    const saved = await dbOps.getPhoto(`${day}_${loc.name}`);
+                    if(saved) setPhoto(saved);
+                };
+                checkPhoto();
+            }, [loc.name, day]);
+
+            const handleCapture = (e) => {
+                if (e.target.files?.[0]) {
+                    const reader = new FileReader();
+                    reader.onload = async (e) => {
+                        const base64 = e.target.result;
+                        setPhoto(base64);
+                        await dbOps.savePhoto(`${day}_${loc.name}`, base64);
+                    };
+                    reader.readAsDataURL(e.target.files[0]);
+                }
+            };
+
+            const distance = useMemo(() => {
+                if (!userLocation || !loc.lat || !loc.lng) return null;
+                return calculateDistance(userLocation.lat, userLocation.lng, loc.lat, loc.lng);
+            }, [userLocation, loc]);
+
+            return (
+                <div className={`bg-white p-4 rounded-2xl card-shadow border relative overflow-hidden transition-all duration-300 ${loc.isCustom ? 'border-orange-200 bg-orange-50/30' : 'border-gray-100'}`}>
+                    <div className="flex justify-between items-start mb-2">
+                        <div className="flex items-center gap-2">
+                            <div className={`p-1.5 rounded-lg ${loc.type === 'food' ? 'bg-orange-100 text-orange-500' : 'bg-gray-100 text-gray-500'}`}>
+                                <Icon name={loc.type === 'food' ? 'utensils' : loc.type === 'shop' ? 'shopping-bag' : loc.type === 'transport' ? 'car' : 'map-pin'} size={16} />
+                            </div>
+                            <span className="font-mono text-lg font-bold text-gray-800">{loc.time}</span>
+                        </div>
+                        <div className="flex gap-2">
+                            <button onClick={() => onExpense(loc.name)} className="bg-yellow-50 text-yellow-600 p-1.5 rounded-full border border-yellow-200 shadow-sm active:scale-90">
+                                <Icon name="japanese-yen" size={16} />
+                            </button>
+                            <label className={`p-1.5 rounded-full cursor-pointer hover:bg-gray-100 active:scale-90 transition-transform ${photo ? 'bg-[#e85a4f] text-white shadow-md' : 'bg-gray-50 text-gray-500'}`}>
+                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleCapture} />
+                                <Icon name="camera" size={16} />
+                            </label>
+                            {loc.link && <a href={loc.link} target="_blank" className="bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1"><Icon name="navigation" size={12} /> 導航</a>}
+                        </div>
+                    </div>
+                    
+                    <h3 className="text-xl font-bold text-gray-800 mb-1">{loc.name} {loc.isCustom && <span className="text-[10px] text-orange-500 bg-orange-100 px-1 rounded ml-1">手動</span>}</h3>
+                    
+                    {distance && <p className="text-xs text-blue-500 font-bold mb-1 flex items-center gap-1"><Icon name="navigation-2" size={10} /> 距 {distance}</p>}
+                    <p className="text-gray-500 text-sm mb-3">{loc.desc}</p>
+                    
+                    {photo && <div className="mb-3 relative rounded-lg overflow-hidden border border-gray-200 animate-fade-in"><img src={photo} className="w-full h-32 object-cover" /><div className="absolute bottom-0 right-0 bg-[#e85a4f] text-white text-[10px] px-2 py-1 rounded-tl-lg font-bold">已紀錄</div></div>}
+
+                    <div className="flex justify-between items-end">
+                        <div className="flex flex-wrap gap-1">{loc.tags && loc.tags.map(tag => <Tag key={tag} text={tag} />)}</div>
+                        {loc.details && <button onClick={() => setIsExpanded(!isExpanded)} className="text-gray-400 hover:text-[#e85a4f] flex items-center gap-1 text-xs font-medium p-1 transition-colors">{isExpanded ? '收起' : '介紹'} <Icon name={isExpanded ? "chevron-up" : "chevron-down"} size={14} /></button>}
+                    </div>
+                    {isExpanded && loc.details && <div className="mt-4 pt-4 border-t border-gray-100 animate-fade-in text-sm text-gray-600 leading-relaxed text-justify">{loc.details}</div>}
+                </div>
+            );
+        };
+
+        const TabItinerary = ({ tripData, activeDay, setActiveDay, userLocation, onExpense }) => {
+            const [mergedLocations, setMergedLocations] = useState([]);
+            const [isSpotModalOpen, setIsSpotModalOpen] = useState(false);
+
+            const loadAndMerge = async () => {
+                const staticLocs = tripData.find(t => t.day === activeDay)?.locations || [];
+                const customSpots = await dbOps.getCustomSpots();
+                const dayCustomSpots = customSpots.filter(s => s.dayIndex === activeDay);
+                const all = [...staticLocs, ...dayCustomSpots].sort((a, b) => a.time.localeCompare(b.time));
+                setMergedLocations(all);
+            };
+
+            useEffect(() => { loadAndMerge(); }, [activeDay]);
+
             const currentTrip = tripData.find(t => t.day === activeDay);
 
             return (
                 <div className="pb-24">
-                    {/* Hero Image */}
                     <div className="relative h-64 w-full">
-                        <img src={currentTrip.image} alt="Hero" className="w-full h-full object-cover" />
+                        <img src={currentTrip.image} className="w-full h-full object-cover" />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent"></div>
                         <div className="absolute bottom-4 left-5 right-5 text-white">
                             <div className="flex items-center gap-2 mb-1 opacity-90">
@@ -308,19 +482,10 @@
                         </div>
                     </div>
 
-                    {/* Date Scroller */}
                     <div className="sticky top-0 z-30 bg-[#f8f5f2]/95 backdrop-blur-sm pt-4 pb-2 px-2 shadow-sm">
                         <div className="flex overflow-x-auto gap-3 scrollbar-hide px-2 pb-2">
                             {tripData.map((day) => (
-                                <button
-                                    key={day.day}
-                                    onClick={() => setActiveDay(day.day)}
-                                    className={`flex-shrink-0 flex flex-col items-center justify-center w-12 h-14 rounded-xl transition-all ${
-                                        activeDay === day.day 
-                                        ? "bg-[#e85a4f] text-white shadow-lg scale-105" 
-                                        : "bg-white text-gray-400 border border-gray-100"
-                                    }`}
-                                >
+                                <button key={day.day} onClick={() => setActiveDay(day.day)} className={`flex-shrink-0 flex flex-col items-center justify-center w-12 h-14 rounded-xl transition-all ${activeDay === day.day ? "bg-[#e85a4f] text-white shadow-lg scale-105" : "bg-white text-gray-400 border border-gray-100"}`}>
                                     <span className="text-[10px]">D{day.day}</span>
                                     <span className="text-lg font-bold">{day.date.split('/')[1].split(' ')[0]}</span>
                                 </button>
@@ -328,317 +493,108 @@
                         </div>
                     </div>
 
-                    {/* Timeline */}
                     <div className="px-5 mt-4 space-y-6">
-                        {currentTrip.locations.map((loc, idx) => (
-                            <LocationCard key={idx} loc={loc} />
+                        {mergedLocations.map((loc, idx) => (
+                            <LocationCard key={idx} loc={loc} userLocation={userLocation} day={currentTrip.day} onExpense={onExpense} />
                         ))}
-
-                        {currentTrip.hotel && (
-                            <div className="bg-[#2d3436] text-white p-5 rounded-2xl shadow-lg mt-8 mb-4 relative overflow-hidden">
-                                <div className="absolute top-0 right-0 p-3 opacity-10">
-                                    <Icon name="bed-double" size={80} />
-                                </div>
-                                <div className="relative z-10">
-                                    <span className="text-gray-400 text-xs uppercase tracking-widest mb-1 block">Night Stay</span>
-                                    <h3 className="text-xl font-bold mb-1">{currentTrip.hotel.name}</h3>
-                                    <div className="flex justify-between items-end mt-4">
-                                        {currentTrip.hotel.link && (
-                                            <a href={currentTrip.hotel.link} target="_blank" className="text-xs text-blue-300 flex items-center gap-1 underline">
-                                                <Icon name="map-pin" size={12}/> 查看地圖
-                                            </a>
-                                        )}
-                                        <span className="text-lg font-mono">¥{currentTrip.hotel.price.toLocaleString()}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
+                        {currentTrip.hotel && <div className="bg-[#2d3436] text-white p-5 rounded-2xl shadow-lg mt-8 mb-4"><h3 className="text-xl font-bold">{currentTrip.hotel.name}</h3></div>}
                     </div>
+
+                    <button 
+                        onClick={() => setIsSpotModalOpen(true)}
+                        className="fixed bottom-24 right-5 bg-[#e85a4f] text-white p-4 rounded-full shadow-2xl active:scale-90 transition-transform z-40 border-4 border-[#f8f5f2]"
+                    >
+                        <Icon name="plus" size={28} />
+                    </button>
+
+                    <AddSpotModal 
+                        isOpen={isSpotModalOpen} 
+                        onClose={() => setIsSpotModalOpen(false)} 
+                        dayIndex={activeDay}
+                        dayDate={currentTrip.fullDate}
+                        userLocation={userLocation}
+                        onAdded={loadAndMerge} 
+                    />
                 </div>
             );
         };
 
-        const TabInfo = () => (
-            <div className="px-5 pt-12 pb-24">
-                <h2 className="text-3xl font-bold text-gray-800 mb-6">旅程資訊</h2>
-                
-                {/* Flights */}
-                <div className="bg-white rounded-2xl p-5 mb-6 card-shadow border-l-4 border-blue-500">
-                    <h3 className="text-lg font-bold text-gray-700 mb-4 flex items-center gap-2">
-                        <Icon name="plane" className="text-blue-500"/> 航班資訊
-                    </h3>
-                    <div className="space-y-4">
-                        <div className="flex justify-between items-center border-b border-gray-100 pb-3">
-                            <div>
-                                <span className="text-xs text-gray-400 block">去程 {flightInfo.outbound.date}</span>
-                                <span className="font-bold text-gray-800 text-lg">{flightInfo.outbound.flight}</span>
-                            </div>
-                            <div className="text-right">
-                                <span className="text-xs text-gray-400 block">{flightInfo.outbound.from} ➔ {flightInfo.outbound.to}</span>
-                                <span className="font-mono text-gray-800">{flightInfo.outbound.time}</span>
-                            </div>
-                        </div>
-                        <div className="flex justify-between items-center">
-                            <div>
-                                <span className="text-xs text-gray-400 block">回程 {flightInfo.inbound.date}</span>
-                                <span className="font-bold text-gray-800 text-lg">{flightInfo.inbound.flight}</span>
-                            </div>
-                            <div className="text-right">
-                                <span className="text-xs text-gray-400 block">{flightInfo.inbound.from} ➔ {flightInfo.inbound.to}</span>
-                                <span className="font-mono text-gray-800">{flightInfo.inbound.time}</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Emergency */}
-                <div className="bg-white rounded-2xl p-5 mb-6 card-shadow border-l-4 border-red-500">
-                    <h3 className="text-lg font-bold text-gray-700 mb-4 flex items-center gap-2">
-                        <Icon name="phone-call" className="text-red-500"/> 緊急聯絡
-                    </h3>
-                    <div className="space-y-3">
-                        {emergencyContacts.map((contact, idx) => (
-                            <div key={idx} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg">
-                                <div>
-                                    <p className="font-bold text-gray-700 text-sm">{contact.title}</p>
-                                    <p className="text-xs text-gray-400">{contact.note}</p>
-                                </div>
-                                <a href={`tel:${contact.phone}`} className="bg-white border border-gray-200 p-2 rounded-full text-green-600 shadow-sm">
-                                    <Icon name="phone" size={16} />
-                                </a>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Checklist (Static for now) */}
-                <div className="bg-orange-50 rounded-2xl p-5 border border-orange-100">
-                    <h3 className="text-lg font-bold text-orange-800 mb-3">行前檢查</h3>
-                    <ul className="list-disc list-inside text-sm text-orange-700 space-y-1">
-                        <li>護照 (有效期6個月以上)</li>
-                        <li>Visit Japan Web 填寫</li>
-                        <li>日幣現金 / 信用卡 / 西瓜卡</li>
-                        <li>國際駕照 / 台灣駕照 / 譯本</li>
-                    </ul>
-                </div>
-            </div>
-        );
-
-        const TabBudget = ({ tripData }) => {
-            // 初始化：嘗試從 localStorage 讀取紀錄，如果沒有則為空陣列
-            const [expenses, setExpenses] = useState(() => {
-                try {
-                    const saved = localStorage.getItem('trip_expenses');
-                    return saved ? JSON.parse(saved) : [];
-                } catch (e) { return []; }
-            });
-
-            const [inputName, setInputName] = useState('');
-            const [inputAmount, setInputAmount] = useState('');
-            const [inputCategory, setInputCategory] = useState('food');
-
-            // 當 expenses 改變時，存入 localStorage
+        const TabBudget = () => {
+            const [expenses, setExpenses] = useState([]);
             useEffect(() => {
-                localStorage.setItem('trip_expenses', JSON.stringify(expenses));
-                // 更新後重新渲染圖示
-                if(window.lucide) window.lucide.createIcons();
-            }, [expenses]);
+                setExpenses(JSON.parse(localStorage.getItem('trip_expenses') || '[]'));
+            }, []);
 
-            const handleAdd = () => {
-                if (!inputName || !inputAmount) return;
-                const newItem = {
-                    id: Date.now(),
-                    name: inputName,
-                    amount: parseInt(inputAmount),
-                    category: inputCategory,
-                    date: new Date().toLocaleDateString()
-                };
-                setExpenses([newItem, ...expenses]);
-                setInputName('');
-                setInputAmount('');
-            };
-
-            const handleDelete = (id) => {
-                if (confirm('確定要刪除這筆紀錄嗎？')) {
-                    setExpenses(expenses.filter(item => item.id !== id));
-                }
-            };
-
-            // 計算邏輯
-            const totalHotel = tripData.reduce((acc, curr) => acc + (curr.hotel ? curr.hotel.price : 0), 0);
-            const totalTracked = expenses.reduce((acc, curr) => acc + curr.amount, 0);
-            const grandTotal = totalHotel + totalTracked;
-
-            const categorySum = expenses.reduce((acc, curr) => {
-                acc[curr.category] = (acc[curr.category] || 0) + curr.amount;
-                return acc;
-            }, { food: 0, transport: 0, shop: 0, other: 0 });
-
-            const categories = [
-                { id: 'food', label: '餐飲', icon: 'utensils', color: 'text-orange-500', bg: 'bg-orange-100' },
-                { id: 'transport', label: '交通', icon: 'car', color: 'text-green-500', bg: 'bg-green-100' },
-                { id: 'shop', label: '購物', icon: 'shopping-bag', color: 'text-purple-500', bg: 'bg-purple-100' },
-                { id: 'other', label: '其他', icon: 'more-horizontal', color: 'text-gray-500', bg: 'bg-gray-100' }
-            ];
+            const total = expenses.reduce((acc, curr) => acc + curr.amount, 0);
 
             return (
                 <div className="px-5 pt-12 pb-24">
-                    <h2 className="text-3xl font-bold text-gray-800 mb-2">預算 & 記帳</h2>
-                    <p className="text-gray-500 text-sm mb-6">住宿(行程預設) + 實際記帳</p>
-
-                    {/* Total Card */}
-                    <div className="bg-gradient-to-br from-[#e85a4f] to-[#d63031] text-white p-6 rounded-3xl shadow-lg mb-8 text-center">
-                        <span className="text-white/80 text-sm font-medium">目前總花費</span>
-                        <div className="text-4xl font-bold font-mono mt-1 mb-2">¥{grandTotal.toLocaleString()}</div>
-                        <div className="text-xs bg-white/20 inline-block px-3 py-1 rounded-full">
-                            記帳小計: ¥{totalTracked.toLocaleString()}
-                        </div>
+                    <h2 className="text-3xl font-bold text-gray-800 mb-2">消費統計</h2>
+                    <div className="bg-gradient-to-br from-green-500 to-green-700 text-white p-6 rounded-3xl shadow-lg mb-8 text-center">
+                        <span className="text-white/80 text-sm font-medium">記帳總額</span>
+                        <div className="text-4xl font-bold font-mono mt-1">¥{total.toLocaleString()}</div>
                     </div>
-
-                    {/* Input Form */}
-                    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 mb-6 sticky top-4 z-20">
-                        <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
-                            <Icon name="plus-circle" size={16} /> 新增支出
-                        </h3>
-                        <div className="flex gap-2 mb-3">
-                             <input 
-                                type="text" 
-                                placeholder="項目 (如: 拉麵)" 
-                                value={inputName}
-                                onChange={(e) => setInputName(e.target.value)}
-                                className="flex-1 bg-gray-50 border-none rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-200 outline-none w-full"
-                            />
-                            <input 
-                                type="number" 
-                                placeholder="¥ 金額" 
-                                value={inputAmount}
-                                onChange={(e) => setInputAmount(e.target.value)}
-                                className="w-24 bg-gray-50 border-none rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-200 outline-none font-mono"
-                            />
-                        </div>
-                        <div className="flex justify-between items-center gap-2">
-                            <div className="flex gap-1 overflow-x-auto scrollbar-hide flex-1">
-                                {categories.map(cat => (
-                                    <button
-                                        key={cat.id}
-                                        onClick={() => setInputCategory(cat.id)}
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${
-                                            inputCategory === cat.id 
-                                            ? `${cat.bg} ${cat.color} ring-2 ring-offset-1 ring-${cat.color.split('-')[1]}-200` 
-                                            : 'bg-gray-50 text-gray-400'
-                                        }`}
-                                    >
-                                        {cat.label}
-                                    </button>
-                                ))}
-                            </div>
-                            <button 
-                                onClick={handleAdd}
-                                disabled={!inputName || !inputAmount}
-                                className="bg-[#e85a4f] text-white p-2 rounded-xl shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
-                            >
-                                <Icon name="check" size={20} />
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Summary List */}
-                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-6">
-                        <div className="p-4 border-b border-gray-50 flex justify-between items-center">
-                            <div className="flex items-center gap-3">
-                                <div className="bg-blue-100 p-2 rounded-lg text-blue-500"><Icon name="bed-double" /></div>
-                                <span className="font-bold text-gray-700">住宿 (預訂)</span>
-                            </div>
-                            <span className="font-mono font-bold text-gray-800">¥{totalHotel.toLocaleString()}</span>
-                        </div>
-                        {categories.map(cat => (
-                            <div key={cat.id} className="p-4 border-b border-gray-50 flex justify-between items-center last:border-0">
-                                <div className="flex items-center gap-3">
-                                    <div className={`${cat.bg} p-2 rounded-lg ${cat.color}`}><Icon name={cat.icon} /></div>
-                                    <span className="font-bold text-gray-700">{cat.label}</span>
+                    <div className="space-y-3">
+                        {expenses.length === 0 && <div className="text-center text-gray-400 py-10">尚無紀錄，請至行程頁面記帳</div>}
+                        {expenses.map(item => (
+                            <div key={item.id} className="bg-white p-3 rounded-xl flex justify-between items-center shadow-sm">
+                                <div>
+                                    <span className="font-bold text-gray-800 block">{item.name}</span>
+                                    <span className="text-xs text-gray-400">{item.date}</span>
                                 </div>
-                                <span className="font-mono font-bold text-gray-800">¥{categorySum[cat.id].toLocaleString()}</span>
+                                <span className="font-mono font-bold text-gray-800">¥{item.amount.toLocaleString()}</span>
                             </div>
                         ))}
                     </div>
-
-                    {/* Recent Transactions List */}
-                     <h3 className="text-sm font-bold text-gray-500 mb-3 px-1">記帳明細</h3>
-                     <div className="space-y-3">
-                        {expenses.length === 0 && (
-                            <div className="text-center py-8 text-gray-300">
-                                <Icon name="clipboard-list" size={32} className="mx-auto mb-2 opacity-50"/>
-                                <p className="text-xs">尚無記帳紀錄，試著新增一筆吧！</p>
-                            </div>
-                        )}
-                        {expenses.map(item => {
-                            const cat = categories.find(c => c.id === item.category);
-                            return (
-                                <div key={item.id} className="bg-white p-3 rounded-xl flex justify-between items-center shadow-sm">
-                                    <div className="flex items-center gap-3">
-                                        <div className={`${cat.bg} p-2 rounded-full ${cat.color} text-xs`}>
-                                            <Icon name={cat.icon} size={14} />
-                                        </div>
-                                        <div>
-                                            <span className="font-medium text-gray-800 text-sm block">{item.name}</span>
-                                            <span className="text-[10px] text-gray-400">{item.date}</span>
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        <span className="font-mono font-bold text-gray-800">¥{item.amount.toLocaleString()}</span>
-                                        <button onClick={() => handleDelete(item.id)} className="text-gray-300 hover:text-red-400 p-1">
-                                            <Icon name="x" size={14} />
-                                        </button>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                     </div>
                 </div>
             );
         };
+
+        const TabInfo = () => <div className="p-5 pt-12"><h2 className="text-2xl font-bold mb-4">功能選單</h2><button onClick={exportData} className="w-full bg-blue-500 text-white p-4 rounded-xl font-bold shadow-md">匯出完整遊記備份</button></div>;
 
         const App = () => {
             const [activeTab, setActiveTab] = useState('itinerary');
             const [activeDay, setActiveDay] = useState(1);
+            const [userLocation, setUserLocation] = useState(null);
+            const [expenseModalInfo, setExpenseModalInfo] = useState({ isOpen: false, defaultName: '', defaultDate: '' });
 
             useEffect(() => {
                 if(window.lucide) window.lucide.createIcons();
+                if (navigator.geolocation) {
+                    navigator.geolocation.watchPosition(p => setUserLocation({ lat: p.coords.latitude, lng: p.coords.longitude }));
+                }
             }, [activeTab, activeDay]);
+
+            const currentTripDate = tripData.find(t => t.day === activeDay)?.fullDate;
 
             return (
                 <div className="max-w-md mx-auto min-h-screen bg-[#f8f5f2] relative shadow-2xl">
-                    
+                    <div className="fixed top-0 left-0 right-0 z-[60] pointer-events-none flex justify-end p-4"><div className="recording-dot w-3 h-3 bg-red-500 rounded-full"></div></div>
+
                     {activeTab === 'itinerary' && (
-                        <TabItinerary tripData={tripData} activeDay={activeDay} setActiveDay={setActiveDay} />
+                        <TabItinerary 
+                            tripData={tripData} 
+                            activeDay={activeDay} 
+                            setActiveDay={setActiveDay} 
+                            userLocation={userLocation}
+                            onExpense={(name) => setExpenseModalInfo({ isOpen: true, defaultName: name, defaultDate: currentTripDate })}
+                        />
                     )}
                     {activeTab === 'info' && <TabInfo />}
-                    {activeTab === 'budget' && <TabBudget tripData={tripData} />}
+                    {activeTab === 'budget' && <TabBudget />}
 
-                    {/* Bottom Navigation */}
+                    <ExpenseModal 
+                        isOpen={expenseModalInfo.isOpen} 
+                        defaultName={expenseModalInfo.defaultName}
+                        defaultDate={expenseModalInfo.defaultDate}
+                        onClose={() => setExpenseModalInfo({ ...expenseModalInfo, isOpen: false })}
+                    />
+
                     <div className="fixed bottom-0 left-0 right-0 glass-nav z-50 max-w-md mx-auto">
                         <div className="flex justify-around items-center py-3">
-                            <button 
-                                onClick={() => setActiveTab('itinerary')}
-                                className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'itinerary' ? 'text-[#e85a4f]' : 'text-gray-400'}`}
-                            >
-                                <Icon name="map" size={24} />
-                                <span className="text-[10px] font-medium">行程</span>
-                            </button>
-                            <button 
-                                onClick={() => setActiveTab('info')}
-                                className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'info' ? 'text-[#e85a4f]' : 'text-gray-400'}`}
-                            >
-                                <Icon name="file-text" size={24} />
-                                <span className="text-[10px] font-medium">資訊</span>
-                            </button>
-                            <button 
-                                onClick={() => setActiveTab('budget')}
-                                className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'budget' ? 'text-[#e85a4f]' : 'text-gray-400'}`}
-                            >
-                                <Icon name="wallet" size={24} />
-                                <span className="text-[10px] font-medium">預算</span>
-                            </button>
+                            <button onClick={() => setActiveTab('itinerary')} className={`flex flex-col items-center gap-1 ${activeTab === 'itinerary' ? 'text-[#e85a4f]' : 'text-gray-400'}`}><Icon name="map" size={24} /><span className="text-[10px]">行程</span></button>
+                            <button onClick={() => setActiveTab('info')} className={`flex flex-col items-center gap-1 ${activeTab === 'info' ? 'text-[#e85a4f]' : 'text-gray-400'}`}><Icon name="file-text" size={24} /><span className="text-[10px]">資訊</span></button>
+                            <button onClick={() => setActiveTab('budget')} className={`flex flex-col items-center gap-1 ${activeTab === 'budget' ? 'text-[#e85a4f]' : 'text-gray-400'}`}><Icon name="wallet" size={24} /><span className="text-[10px]">統計</span></button>
                         </div>
                     </div>
                 </div>
