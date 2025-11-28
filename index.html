@@ -127,7 +127,7 @@
             return d < 1 ? `${Math.round(d * 1000)}m` : `${d.toFixed(1)}km`;
         };
 
-        // --- 完整行程資料 (整合您的文字描述 + 圖片 + GPS) ---
+        // --- 完整行程資料 (使用 .jpg 與 詳細描述) ---
         const tripData = [
             {
                 day: 1,
@@ -291,7 +291,26 @@
         ];
 
         // --- 組件 ---
-        const Icon = ({ name, size = 18, className }) => <i data-lucide={name} style={{ fontSize: size }} className={className}></i>;
+        const Icon = ({ name, size = 18, className }) => {
+            // 使用 ref 確保圖示被渲染
+            const iconRef = useRef(null);
+            
+            useEffect(() => {
+                if (window.lucide && iconRef.current) {
+                    window.lucide.createIcons({
+                        root: iconRef.current.parentNode,
+                        nameAttr: 'data-lucide',
+                        attrs: {
+                            class: className,
+                            style: `width: ${size}px; height: ${size}px;`
+                        }
+                    });
+                }
+            }, [name, size, className]);
+
+            return <i ref={iconRef} data-lucide={name} className={className} style={{ width: size, height: size, display: 'inline-block' }}></i>;
+        };
+
         const Tag = ({ text }) => <span className={`text-[10px] px-2 py-1 rounded-full font-bold mr-1 bg-gray-100 text-gray-600`}>{text}</span>;
 
         // 記帳 Modal (修正日期邏輯)
@@ -425,10 +444,10 @@
                             <span className="font-mono text-lg font-bold text-gray-800">{loc.time}</span>
                         </div>
                         <div className="flex gap-2">
-                            <button onClick={() => onExpense(loc.name)} className="bg-yellow-50 text-yellow-600 p-1.5 rounded-full border border-yellow-200 shadow-sm active:scale-90">
+                            <button onClick={() => onExpense(loc.name)} className="bg-yellow-50 text-yellow-600 p-1.5 rounded-full border border-yellow-200 shadow-sm active:scale-90 flex items-center justify-center w-8 h-8">
                                 <Icon name="japanese-yen" size={16} />
                             </button>
-                            <label className={`p-1.5 rounded-full cursor-pointer hover:bg-gray-100 active:scale-90 transition-transform ${photo ? 'bg-[#e85a4f] text-white shadow-md' : 'bg-gray-50 text-gray-500'}`}>
+                            <label className={`p-1.5 rounded-full cursor-pointer hover:bg-gray-100 active:scale-90 transition-transform flex items-center justify-center w-8 h-8 ${photo ? 'bg-[#e85a4f] text-white shadow-md' : 'bg-gray-50 text-gray-500'}`}>
                                 <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleCapture} />
                                 <Icon name="camera" size={16} />
                             </label>
