@@ -127,7 +127,7 @@
             return d < 1 ? `${Math.round(d * 1000)}m` : `${d.toFixed(1)}km`;
         };
 
-        // --- 完整行程資料 (使用 .jpg 與 詳細描述) ---
+        // --- 完整行程資料 (保留您的詳細介紹與 jpg 圖片) ---
         const tripData = [
             {
                 day: 1,
@@ -291,29 +291,37 @@
         ];
 
         // --- 組件 ---
+        // 修正 Icon 組件，使用 React 的 dangerouslySetInnerHTML 來確保渲染
         const Icon = ({ name, size = 18, className }) => {
-            // 使用 ref 確保圖示被渲染
-            const iconRef = useRef(null);
+            const [iconHtml, setIconHtml] = useState('');
             
             useEffect(() => {
-                if (window.lucide && iconRef.current) {
-                    window.lucide.createIcons({
-                        root: iconRef.current.parentNode,
-                        nameAttr: 'data-lucide',
-                        attrs: {
-                            class: className,
-                            style: `width: ${size}px; height: ${size}px;`
-                        }
-                    });
+                if (window.lucide && window.lucide.icons) {
+                    const iconKey = name.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join('');
+                    const iconNode = window.lucide.icons[iconKey] || window.lucide.icons.CircleHelp;
+                    
+                    // 手動建立 SVG 字串
+                    // Lucide 的圖示是個二維陣列，我們需要轉成 SVG
+                    // 但最簡單的方法是使用 lucide.createIcons 產生的 HTML，
+                    // 這裡為了 React 穩定性，我們使用 lucide 的 toSvg 方法 (如果版本支援)
+                    // 或者更簡單：我們直接讓 lucide 替換一個臨時元素
+                    
+                    const temp = document.createElement('div');
+                    const iconElement = window.lucide.createElement(iconNode);
+                    iconElement.setAttribute('width', size);
+                    iconElement.setAttribute('height', size);
+                    if(className) iconElement.setAttribute('class', className);
+                    temp.appendChild(iconElement);
+                    setIconHtml(temp.innerHTML);
                 }
             }, [name, size, className]);
 
-            return <i ref={iconRef} data-lucide={name} className={className} style={{ width: size, height: size, display: 'inline-block' }}></i>;
+            return <span dangerouslySetInnerHTML={{ __html: iconHtml }} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} />;
         };
 
         const Tag = ({ text }) => <span className={`text-[10px] px-2 py-1 rounded-full font-bold mr-1 bg-gray-100 text-gray-600`}>{text}</span>;
 
-        // 記帳 Modal (修正日期邏輯)
+        // 記帳 Modal
         const ExpenseModal = ({ isOpen, onClose, defaultName, defaultDate }) => {
             const [name, setName] = useState('');
             const [amount, setAmount] = useState('');
@@ -366,7 +374,7 @@
             );
         };
 
-        // 新增景點 Modal (顯示日期提示)
+        // 新增景點 Modal
         const AddSpotModal = ({ isOpen, onClose, dayIndex, dayDate, userLocation, onAdded }) => {
             const [name, setName] = useState('');
             const [time, setTime] = useState(() => {
@@ -445,7 +453,7 @@
                         </div>
                         <div className="flex gap-2">
                             <button onClick={() => onExpense(loc.name)} className="bg-yellow-50 text-yellow-600 p-1.5 rounded-full border border-yellow-200 shadow-sm active:scale-90 flex items-center justify-center w-8 h-8">
-                                <Icon name="japanese-yen" size={16} />
+                                <Icon name="wallet" size={16} />
                             </button>
                             <label className={`p-1.5 rounded-full cursor-pointer hover:bg-gray-100 active:scale-90 transition-transform flex items-center justify-center w-8 h-8 ${photo ? 'bg-[#e85a4f] text-white shadow-md' : 'bg-gray-50 text-gray-500'}`}>
                                 <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleCapture} />
@@ -578,7 +586,6 @@
             const [expenseModalInfo, setExpenseModalInfo] = useState({ isOpen: false, defaultName: '', defaultDate: '' });
 
             useEffect(() => {
-                if(window.lucide) window.lucide.createIcons();
                 if (navigator.geolocation) {
                     navigator.geolocation.watchPosition(p => setUserLocation({ lat: p.coords.latitude, lng: p.coords.longitude }));
                 }
