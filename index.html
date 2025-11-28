@@ -418,9 +418,10 @@
             const [photo, setPhoto] = useState(null);
             
             useEffect(() => {
+                setIsExpanded(false);
                 const checkPhoto = async () => {
                     const saved = await dbOps.getPhoto(`${day}_${loc.name}`);
-                    if(saved) setPhoto(saved);
+                    setPhoto(saved || null);
                 };
                 checkPhoto();
             }, [loc.name, day]);
@@ -631,4 +632,5 @@
         root.render(<App />);
     </script>
 </body>
+
 </html>
