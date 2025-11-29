@@ -496,7 +496,7 @@
                     {distance && <p className="text-xs text-blue-500 font-bold mb-1 flex items-center gap-1"><Icon name="navigation-2" size={10} /> 距 {distance}</p>}
                     <p className="text-gray-500 text-sm mb-3">{loc.desc}</p>
 
-                    {/* 筆記輸入區域 (新增) */}
+                     {/* 筆記輸入區域 */}
                     {showNoteInput && (
                         <div className="mb-3 animate-fade-in">
                             <textarea 
@@ -507,7 +507,17 @@
                                 rows="3"
                             />
                             <div className="flex justify-end gap-2">
-                                <button onClick={() => {setShowNoteInput(false); setNote(note); /* 取消時不儲存，恢復原狀 */}} className="text-xs text-gray-400 px-3 py-1">取消</button>
+                                {/* 修正：取消時，重新讀取資料庫的舊筆記來還原狀態 */}
+                                <button 
+                                    onClick={async () => {
+                                        setShowNoteInput(false);
+                                        const savedNote = await dbOps.getNote(`${day}_${loc.name}`);
+                                        setNote(savedNote || '');
+                                    }} 
+                                    className="text-xs text-gray-400 px-3 py-1"
+                                >
+                                    取消
+                                </button>
                                 <button onClick={handleSaveNote} className="text-xs bg-blue-500 text-white px-3 py-1 rounded-md shadow-sm">儲存</button>
                             </div>
                         </div>
@@ -709,6 +719,7 @@
 </body>
 
 </html>
+
 
 
 
