@@ -75,6 +75,13 @@
                     req.onsuccess = () => r(req.result?.image);
                 });
             },
+            deletePhoto: async (id) => {
+                const db = await initDB();
+                const tx = db.transaction(STORE_PHOTOS, 'readwrite');
+                const store = tx.objectStore(STORE_PHOTOS);
+                store.delete(id);
+                return tx.complete;
+            },
             addCustomSpot: async (spot) => {
                 const db = await initDB();
                 return new Promise(r => {
@@ -462,8 +469,26 @@
                     {distance && <p className="text-xs text-blue-500 font-bold mb-1 flex items-center gap-1"><Icon name="navigation-2" size={10} /> 距 {distance}</p>}
                     <p className="text-gray-500 text-sm mb-3">{loc.desc}</p>
                     
-                    {photo && <div className="mb-3 relative rounded-lg overflow-hidden border border-gray-200 animate-fade-in"><img src={photo} className="w-full h-32 object-cover" /><div className="absolute bottom-0 right-0 bg-[#e85a4f] text-white text-[10px] px-2 py-1 rounded-tl-lg font-bold">已紀錄</div></div>}
-
+                    {photo && (
+                        <div className="mb-3 relative rounded-lg overflow-hidden border border-gray-200 animate-fade-in group">
+                            <img src={photo} className="w-full h-32 object-cover" />
+                            <div className="absolute bottom-0 right-0 bg-[#e85a4f] text-white text-[10px] px-2 py-1 rounded-tl-lg font-bold">已紀錄</div>
+                            
+                            {/* 新增刪除按鈕 */}
+                            <button 
+                                onClick={async (e) => {
+                                    e.stopPropagation(); // 防止觸發卡片展開
+                                    if(confirm('確定要刪除這張照片嗎？')) {
+                                        await dbOps.deletePhoto(`${day}_${loc.name}`);
+                                        setPhoto(null);
+                                    }
+                                }}
+                                className="absolute top-2 right-2 bg-black/50 text-white p-1.5 rounded-full hover:bg-red-500 transition-colors"
+                            >
+                                <Icon name="trash-2" size={14} />
+                            </button>
+                        </div>
+                    )}
                     <div className="flex justify-between items-end">
                         <div className="flex flex-wrap gap-1">{loc.tags && loc.tags.map(tag => <Tag key={tag} text={tag} />)}</div>
                         {loc.details && <button onClick={() => setIsExpanded(!isExpanded)} className="text-gray-400 hover:text-[#e85a4f] flex items-center gap-1 text-xs font-medium p-1 transition-colors">{isExpanded ? '收起' : '介紹'} <Icon name={isExpanded ? "chevron-up" : "chevron-down"} size={14} /></button>}
@@ -625,6 +650,7 @@
 </body>
 
 </html>
+
 
 
 
