@@ -1,14 +1,17 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
+    <!-- iOS 桌面圖示 -->
+    <link rel="apple-touch-icon" href="icon.png">
+    <!-- 瀏覽器分頁小圖示 -->
+    <link rel="icon" type="image/png" href="icon.png">
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>九州八日賞楓行旅</title>
     
     <!-- PWA 設定 -->
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="icon.png">
-    <link rel="icon" type="image/png" href="icon.png">
 
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -28,6 +31,13 @@
         .card-shadow { box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
         .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .recording-dot { animation: pulse-red 2s infinite; }
+        @keyframes pulse-red {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
         
         .modal-enter { animation: modalUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         @keyframes modalUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
@@ -82,7 +92,9 @@
                 const tx = db.transaction(STORE_PHOTOS, 'readwrite');
                 const store = tx.objectStore(STORE_PHOTOS);
                 store.delete(id);
-                return tx.complete;
+                return new Promise(resolve => {
+                    tx.oncomplete = () => resolve(true);
+                });
             },
             saveNote: async (id, text) => {
                 const db = await initDB();
@@ -99,7 +111,6 @@
                     req.onsuccess = () => r(req.result?.text || '');
                 });
             },
-            
             addCustomSpot: async (spot) => {
                 const db = await initDB();
                 return new Promise(r => {
@@ -123,8 +134,8 @@
                 req.onsuccess = () => r(req.result);
             });
             const [gps, photos, customSpots, notes] = await Promise.all([
-                    getLogs(STORE_GPS), getLogs(STORE_PHOTOS), getLogs(STORE_CUSTOM_SPOTS), getLogs(STORE_NOTES) // 新增 getLogs(STORE_NOTES)
-                ]);
+                getLogs(STORE_GPS), getLogs(STORE_PHOTOS), getLogs(STORE_CUSTOM_SPOTS), getLogs(STORE_NOTES)
+            ]);
             const expenses = JSON.parse(localStorage.getItem('trip_expenses') || '[]');
             const data = { gps, photos, customSpots, notes, expenses, exportTime: new Date().toLocaleString() };
             const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
@@ -145,12 +156,12 @@
             return d < 1 ? `${Math.round(d * 1000)}m` : `${d.toFixed(1)}km`;
         };
 
-        // --- 完整行程資料 (保留您的詳細介紹與 jpg 圖片) ---
+        // --- 完整行程資料 ---
         const tripData = [
             {
                 day: 1,
                 date: "11/29 (五)",
-                fullDate: "2025-11-29",
+                fullDate: "2024-11-29",
                 title: "秋月古城與銀杏",
                 weather: "晴時多雲 15°C",
                 image: "./images/1.jpg",
@@ -193,7 +204,7 @@
             {
                 day: 2,
                 date: "11/30 (六)",
-                fullDate: "2025-11-30",
+                fullDate: "2024-11-30",
                 title: "福岡繁華巡禮",
                 weather: "多雲 14°C",
                 image: "./images/2.jpg",
@@ -207,7 +218,7 @@
             {
                 day: 3,
                 date: "12/01 (日)",
-                fullDate: "2025-12-01",
+                fullDate: "2024-12-01",
                 title: "耶馬溪與別府",
                 weather: "晴天 12°C",
                 image: "./images/3.jpg",
@@ -221,7 +232,7 @@
             {
                 day: 4,
                 date: "12/02 (一)",
-                fullDate: "2025-12-02",
+                fullDate: "2024-12-02",
                 title: "由布院童話散策",
                 weather: "陰時多雲 11°C",
                 image: "./images/4.jpg",
@@ -236,7 +247,7 @@
             {
                 day: 5,
                 date: "12/03 (二)",
-                fullDate: "2025-12-03",
+                fullDate: "2024-12-03",
                 title: "黑川溫泉秘境",
                 weather: "雨後轉晴 9°C",
                 image: "./images/5.jpg",
@@ -250,7 +261,7 @@
             {
                 day: 6,
                 date: "12/04 (三)",
-                fullDate: "2025-12-04",
+                fullDate: "2024-12-04",
                 title: "阿蘇火山與神話",
                 weather: "晴朗 8°C",
                 image: "./images/6.jpg",
@@ -264,7 +275,7 @@
             {
                 day: 7,
                 date: "12/05 (四)",
-                fullDate: "2025-12-05",
+                fullDate: "2024-12-05",
                 title: "高千穗划船",
                 weather: "多雲 10°C",
                 image: "./images/7.jpg",
@@ -297,7 +308,7 @@
              {
                 day: 8,
                 date: "12/06 (五)",
-                fullDate: "2025-12-06",
+                fullDate: "2024-12-06",
                 title: "返台",
                 weather: "晴 16°C",
                 image: "./images/8.jpg",
@@ -317,12 +328,6 @@
                 if (window.lucide && window.lucide.icons) {
                     const iconKey = name.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join('');
                     const iconNode = window.lucide.icons[iconKey] || window.lucide.icons.CircleHelp;
-                    
-                    // 手動建立 SVG 字串
-                    // Lucide 的圖示是個二維陣列，我們需要轉成 SVG
-                    // 但最簡單的方法是使用 lucide.createIcons 產生的 HTML，
-                    // 這裡為了 React 穩定性，我們使用 lucide 的 toSvg 方法 (如果版本支援)
-                    // 或者更簡單：我們直接讓 lucide 替換一個臨時元素
                     
                     const temp = document.createElement('div');
                     const iconElement = window.lucide.createElement(iconNode);
@@ -441,12 +446,18 @@
                 setIsExpanded(false);
                 const checkData = async () => {
                     const savedPhoto = await dbOps.getPhoto(`${day}_${loc.name}`);
-                    setPhoto(savedPhoto || null);
+                    setPhoto(savedPhoto || null); // 修復照片殘留
                     const savedNote = await dbOps.getNote(`${day}_${loc.name}`);
                     setNote(savedNote || '');
                 };
                 checkData();
             }, [loc.name, day]);
+
+            // 修正白屏關鍵：定義 handleSaveNote
+            const handleSaveNote = async () => {
+                await dbOps.saveNote(`${day}_${loc.name}`, note);
+                setShowNoteInput(false);
+            };
 
             const handleCapture = (e) => {
                 if (e.target.files?.[0]) {
@@ -459,12 +470,7 @@
                     reader.readAsDataURL(e.target.files[0]);
                 }
             };
-            const handleSaveNote = async () => {
-                await dbOps.saveNote(`${day}_${loc.name}`, note);
-                setShowNoteInput(false);
-                // 可以加個簡單提示，或是不用
-            };
-            
+
             const distance = useMemo(() => {
                 if (!userLocation || !loc.lat || !loc.lng) return null;
                 return calculateDistance(userLocation.lat, userLocation.lng, loc.lat, loc.lng);
@@ -479,9 +485,8 @@
                             </div>
                             <span className="font-mono text-lg font-bold text-gray-800">{loc.time}</span>
                         </div>
-                        
                         <div className="flex gap-2">
-                            <button onClick={() => setShowNoteInput(!showNoteInput)} className={`p-1.5 rounded-full border shadow-sm active:scale-90 flex items-center justify-center w-8 h-8 ${note ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
+                             <button onClick={() => setShowNoteInput(!showNoteInput)} className={`p-1.5 rounded-full border shadow-sm active:scale-90 flex items-center justify-center w-8 h-8 ${note ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
                                 <Icon name="pencil" size={14} />
                             </button>
                             <button onClick={() => onExpense(loc.name)} className="bg-yellow-50 text-yellow-600 p-1.5 rounded-full border border-yellow-200 shadow-sm active:scale-90 flex items-center justify-center w-8 h-8">
@@ -527,11 +532,11 @@
                         </div>
                     )}
 
-                    {/* 已儲存的筆記顯示 (新增) - 如果沒在輸入模式且有筆記時顯示 */}
+                    {/* 已儲存的筆記顯示 */}
                     {!showNoteInput && note && (
                         <div 
                             className="mb-3 p-3 bg-yellow-50/50 border border-yellow-100 rounded-lg text-sm text-gray-600 cursor-pointer hover:bg-yellow-50 transition-colors"
-                            onClick={() => setShowNoteInput(true)} // 點擊可再次編輯
+                            onClick={() => setShowNoteInput(true)} 
                         >
                             <div className="flex items-start gap-2">
                                 <Icon name="sticky-note" size={14} className="text-yellow-400 mt-0.5 shrink-0" />
@@ -539,18 +544,16 @@
                             </div>
                         </div>
                     )}
-
-
                     
                     {photo && (
                         <div className="mb-3 relative rounded-lg overflow-hidden border border-gray-200 animate-fade-in group">
                             <img src={photo} className="w-full h-32 object-cover" />
                             <div className="absolute bottom-0 right-0 bg-[#e85a4f] text-white text-[10px] px-2 py-1 rounded-tl-lg font-bold">已紀錄</div>
                             
-                            {/* 新增刪除按鈕 */}
+                            {/* 刪除按鈕 */}
                             <button 
                                 onClick={async (e) => {
-                                    e.stopPropagation(); // 防止觸發卡片展開
+                                    e.stopPropagation();
                                     if(confirm('確定要刪除這張照片嗎？')) {
                                         await dbOps.deletePhoto(`${day}_${loc.name}`);
                                         setPhoto(null);
@@ -562,6 +565,7 @@
                             </button>
                         </div>
                     )}
+
                     <div className="flex justify-between items-end">
                         <div className="flex flex-wrap gap-1">{loc.tags && loc.tags.map(tag => <Tag key={tag} text={tag} />)}</div>
                         {loc.details && <button onClick={() => setIsExpanded(!isExpanded)} className="text-gray-400 hover:text-[#e85a4f] flex items-center gap-1 text-xs font-medium p-1 transition-colors">{isExpanded ? '收起' : '介紹'} <Icon name={isExpanded ? "chevron-up" : "chevron-down"} size={14} /></button>}
@@ -678,6 +682,7 @@
             const [expenseModalInfo, setExpenseModalInfo] = useState({ isOpen: false, defaultName: '', defaultDate: '' });
 
             useEffect(() => {
+                // 不再需要在這裡呼叫 createIcons，因為 Icon 組件會自己處理
                 if (navigator.geolocation) {
                     navigator.geolocation.watchPosition(p => setUserLocation({ lat: p.coords.latitude, lng: p.coords.longitude }));
                 }
@@ -687,6 +692,8 @@
 
             return (
                 <div className="max-w-md mx-auto min-h-screen bg-[#f8f5f2] relative shadow-2xl">
+                    <div className="fixed top-0 left-0 right-0 z-[60] pointer-events-none flex justify-end p-4"></div>
+
                     {activeTab === 'itinerary' && (
                         <TabItinerary 
                             tripData={tripData} 
@@ -721,14 +728,4 @@
         root.render(<App />);
     </script>
 </body>
-
 </html>
-
-
-
-
-
-
-
-
-
