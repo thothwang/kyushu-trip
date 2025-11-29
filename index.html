@@ -457,7 +457,7 @@
                                 <Icon name="wallet" size={16} />
                             </button>
                             <label className={`p-1.5 rounded-full cursor-pointer hover:bg-gray-100 active:scale-90 transition-transform flex items-center justify-center w-8 h-8 ${photo ? 'bg-[#e85a4f] text-white shadow-md' : 'bg-gray-50 text-gray-500'}`}>
-                                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleCapture} />
+                                <input type="file" accept="image/*" className="hidden" onChange={handleCapture} />
                                 <Icon name="camera" size={16} />
                             </label>
                             {loc.link && <a href={loc.link} target="_blank" className="bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1"><Icon name="navigation" size={12} /> 導航</a>}
@@ -634,4 +634,5 @@
 </body>
 
 </html>
+
 
