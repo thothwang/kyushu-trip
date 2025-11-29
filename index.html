@@ -455,7 +455,12 @@
                     reader.readAsDataURL(e.target.files[0]);
                 }
             };
-
+            const handleSaveNote = async () => {
+                await dbOps.saveNote(`${day}_${loc.name}`, note);
+                setShowNoteInput(false);
+                // 可以加個簡單提示，或是不用
+            };
+            
             const distance = useMemo(() => {
                 if (!userLocation || !loc.lat || !loc.lng) return null;
                 return calculateDistance(userLocation.lat, userLocation.lng, loc.lat, loc.lng);
@@ -704,6 +709,7 @@
 </body>
 
 </html>
+
 
 
 
