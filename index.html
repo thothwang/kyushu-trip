@@ -85,9 +85,13 @@
                 return tx.complete;
             },
             saveNote: async (id, text) => {
-                    const db = await initDB();
-                    db.transaction(STORE_NOTES, 'readwrite').objectStore(STORE_NOTES).put({ id, text, timestamp: Date.now() });
-                },
+                const db = await initDB();
+                const tx = db.transaction(STORE_NOTES, 'readwrite');
+                tx.objectStore(STORE_NOTES).put({ id, text, timestamp: Date.now() });
+                return new Promise((resolve) => {
+                    tx.oncomplete = () => resolve(true);
+                });
+            },
             getNote: async (id) => {
                 const db = await initDB();
                 return new Promise(r => {
@@ -719,6 +723,7 @@
 </body>
 
 </html>
+
 
 
 
