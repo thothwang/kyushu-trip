@@ -507,7 +507,7 @@
                                 rows="3"
                             />
                             <div className="flex justify-end gap-2">
-                                <button onClick={() => setShowNoteInput(false)} className="text-xs text-gray-400 px-3 py-1">取消</button>
+                                <button onClick={() => {setShowNoteInput(false); setNote(note); /* 取消時不儲存，恢復原狀 */}} className="text-xs text-gray-400 px-3 py-1">取消</button>
                                 <button onClick={handleSaveNote} className="text-xs bg-blue-500 text-white px-3 py-1 rounded-md shadow-sm">儲存</button>
                             </div>
                         </div>
@@ -709,6 +709,7 @@
 </body>
 
 </html>
+
 
 
 
