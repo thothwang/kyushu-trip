@@ -44,6 +44,7 @@
         const STORE_GPS = 'gps_logs';
         const STORE_PHOTOS = 'photos';
         const STORE_CUSTOM_SPOTS = 'custom_spots';
+        const STORE_NOTES = 'spot_notes';
 
         const initDB = () => {
             return new Promise((resolve, reject) => {
@@ -54,6 +55,7 @@
                     if (!db.objectStoreNames.contains(STORE_GPS)) db.createObjectStore(STORE_GPS, { keyPath: 'timestamp' });
                     if (!db.objectStoreNames.contains(STORE_PHOTOS)) db.createObjectStore(STORE_PHOTOS, { keyPath: 'id' });
                     if (!db.objectStoreNames.contains(STORE_CUSTOM_SPOTS)) db.createObjectStore(STORE_CUSTOM_SPOTS, { keyPath: 'id', autoIncrement: true });
+                    if (!db.objectStoreNames.contains(STORE_NOTES)) db.createObjectStore(STORE_NOTES, { keyPath: 'id' });
                 };
                 request.onsuccess = (event) => resolve(event.target.result);
             });
@@ -82,6 +84,18 @@
                 store.delete(id);
                 return tx.complete;
             },
+            saveNote: async (id, text) => {
+                    const db = await initDB();
+                    db.transaction(STORE_NOTES, 'readwrite').objectStore(STORE_NOTES).put({ id, text, timestamp: Date.now() });
+                },
+            getNote: async (id) => {
+                const db = await initDB();
+                return new Promise(r => {
+                    const req = db.transaction(STORE_NOTES, 'readonly').objectStore(STORE_NOTES).get(id);
+                    req.onsuccess = () => r(req.result?.text || '');
+                });
+            },
+            
             addCustomSpot: async (spot) => {
                 const db = await initDB();
                 return new Promise(r => {
@@ -104,11 +118,11 @@
                 const req = db.transaction(store, 'readonly').objectStore(store).getAll();
                 req.onsuccess = () => r(req.result);
             });
-            const [gps, photos, customSpots] = await Promise.all([
-                getLogs(STORE_GPS), getLogs(STORE_PHOTOS), getLogs(STORE_CUSTOM_SPOTS)
-            ]);
+            const [gps, photos, customSpots, notes] = await Promise.all([
+                    getLogs(STORE_GPS), getLogs(STORE_PHOTOS), getLogs(STORE_CUSTOM_SPOTS), getLogs(STORE_NOTES) // 新增 getLogs(STORE_NOTES)
+                ]);
             const expenses = JSON.parse(localStorage.getItem('trip_expenses') || '[]');
-            const data = { gps, photos, customSpots, expenses, exportTime: new Date().toLocaleString() };
+            const data = { gps, photos, customSpots, notes, expenses, exportTime: new Date().toLocaleString() };
             const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
@@ -416,14 +430,18 @@
         const LocationCard = ({ loc, userLocation, day, onExpense }) => {
             const [isExpanded, setIsExpanded] = useState(false);
             const [photo, setPhoto] = useState(null);
+            const [showNoteInput, setShowNoteInput] = useState(false);
+            const [note, setNote] = useState('');
             
             useEffect(() => {
                 setIsExpanded(false);
-                const checkPhoto = async () => {
-                    const saved = await dbOps.getPhoto(`${day}_${loc.name}`);
-                    setPhoto(saved || null);
+                const checkData = async () => {
+                    const savedPhoto = await dbOps.getPhoto(`${day}_${loc.name}`);
+                    setPhoto(savedPhoto || null);
+                    const savedNote = await dbOps.getNote(`${day}_${loc.name}`);
+                    setNote(savedNote || '');
                 };
-                checkPhoto();
+                checkData();
             }, [loc.name, day]);
 
             const handleCapture = (e) => {
@@ -452,7 +470,11 @@
                             </div>
                             <span className="font-mono text-lg font-bold text-gray-800">{loc.time}</span>
                         </div>
+                        
                         <div className="flex gap-2">
+                            <button onClick={() => setShowNoteInput(!showNoteInput)} className={`p-1.5 rounded-full border shadow-sm active:scale-90 flex items-center justify-center w-8 h-8 ${note ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
+                                <Icon name="pencil" size={14} />
+                            </button>
                             <button onClick={() => onExpense(loc.name)} className="bg-yellow-50 text-yellow-600 p-1.5 rounded-full border border-yellow-200 shadow-sm active:scale-90 flex items-center justify-center w-8 h-8">
                                 <Icon name="wallet" size={16} />
                             </button>
@@ -468,6 +490,38 @@
                     
                     {distance && <p className="text-xs text-blue-500 font-bold mb-1 flex items-center gap-1"><Icon name="navigation-2" size={10} /> 距 {distance}</p>}
                     <p className="text-gray-500 text-sm mb-3">{loc.desc}</p>
+
+                    {/* 筆記輸入區域 (新增) */}
+                    {showNoteInput && (
+                        <div className="mb-3 animate-fade-in">
+                            <textarea 
+                                value={note}
+                                onChange={(e) => setNote(e.target.value)}
+                                placeholder="寫點什麼..."
+                                className="w-full p-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-100 outline-none mb-2"
+                                rows="3"
+                            />
+                            <div className="flex justify-end gap-2">
+                                <button onClick={() => setShowNoteInput(false)} className="text-xs text-gray-400 px-3 py-1">取消</button>
+                                <button onClick={handleSaveNote} className="text-xs bg-blue-500 text-white px-3 py-1 rounded-md shadow-sm">儲存</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* 已儲存的筆記顯示 (新增) - 如果沒在輸入模式且有筆記時顯示 */}
+                    {!showNoteInput && note && (
+                        <div 
+                            className="mb-3 p-3 bg-yellow-50/50 border border-yellow-100 rounded-lg text-sm text-gray-600 cursor-pointer hover:bg-yellow-50 transition-colors"
+                            onClick={() => setShowNoteInput(true)} // 點擊可再次編輯
+                        >
+                            <div className="flex items-start gap-2">
+                                <Icon name="sticky-note" size={14} className="text-yellow-400 mt-0.5 shrink-0" />
+                                <span className="whitespace-pre-wrap">{note}</span>
+                            </div>
+                        </div>
+                    )}
+
+
                     
                     {photo && (
                         <div className="mb-3 relative rounded-lg overflow-hidden border border-gray-200 animate-fade-in group">
@@ -650,6 +704,7 @@
 </body>
 
 </html>
+
 
 
 
