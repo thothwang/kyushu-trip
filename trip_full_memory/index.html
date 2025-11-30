@@ -41,24 +41,46 @@
 
     <script src="data.js"></script>
 
-    <script>
+<script>
         lucide.createIcons();
 
         // --- 初始化地圖 ---
-        const map = L.map('map-container', { zoomControl: false }).setView([33.5902, 130.4017], 9);
+        // scrollWheelZoom: false 防止使用者想滑網頁結果卡在地圖上
+        const map = L.map('map-container', { zoomControl: false, scrollWheelZoom: false }).setView([33.5902, 130.4017], 9);
+        
+        // 使用風格比較乾淨的地圖底圖
         L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
             attribution: '&copy; OpenStreetMap', maxZoom: 19
         }).addTo(map);
 
         const markers = {}; 
-        const allPathCoords = [];
+        let allPathCoords = [];
+        let currentDayPath = []; // 用來暫存每天的路徑，方便切換天數時縮放
 
-        // 圖示樣式
-        const createIcon = (color) => L.divIcon({
-            className: 'custom-div-icon',
-            html: `<div style='background-color:${color}; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 0 3px ${color};'></div>`,
-            iconSize: [14, 14], iconAnchor: [7, 7]
+        // --- 定義圖示樣式 ---
+        
+        // 1. 一般狀態 (紅色小點)
+        const defaultIcon = L.divIcon({
+            className: 'marker-default',
+            html: `<div style='background-color:#EF4444; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 1px 3px rgba(0,0,0,0.3);'></div>`,
+            iconSize: [12, 12], iconAnchor: [6, 6]
         });
+
+        // 2. 活躍狀態 (藍色大點 + 光暈動畫)
+        const activeIcon = L.divIcon({
+            className: 'marker-active',
+            html: `<div style='position:relative; width: 20px; height: 20px;'>
+                     <div style='position:absolute; inset:0; background-color:#3B82F6; border-radius:50%; opacity:0.3; animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;'></div>
+                     <div style='position:absolute; inset:2px; background-color:#3B82F6; border-radius:50%; border: 3px solid white; box-shadow: 0 4px 6px rgba(0,0,0,0.4);'></div>
+                   </div>`,
+            iconSize: [20, 20], iconAnchor: [10, 10]
+        });
+
+        // 注入 CSS 動畫
+        const style = document.createElement('style');
+        style.innerHTML = `@keyframes ping { 75%, 100% { transform: scale(2); opacity: 0; } }`;
+        document.head.appendChild(style);
+
 
         // --- 渲染內容 ---
         if (typeof TRIP_FULL_DATA !== 'undefined' && TRIP_FULL_DATA.length > 0) {
@@ -66,21 +88,28 @@
             const mainContainer = document.getElementById('main-content');
             
             TRIP_FULL_DATA.forEach((dayData, dIndex) => {
+                const dayPathCoords = []; // 這一天的所有座標
+
                 // 1. 建立導覽按鈕
                 const navBtn = document.createElement('button');
                 navBtn.className = `day-nav-item flex-shrink-0 px-4 py-1.5 rounded-full border border-gray-200 text-sm font-bold text-gray-500 transition-colors`;
                 navBtn.innerText = `Day ${dayData.day}`;
                 navBtn.onclick = () => {
                     document.getElementById(`day-section-${dayData.day}`).scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    
+                    // [New] 點擊天數時，地圖自動縮放到「那一天的範圍」
+                    if (dayPathCoords.length > 0) {
+                        map.fitBounds(L.latLngBounds(dayPathCoords), { padding: [30, 30], maxZoom: 13 });
+                    }
                 };
                 navContainer.appendChild(navBtn);
 
                 // 2. 建立該天的區塊
                 const daySection = document.createElement('div');
                 daySection.id = `day-section-${dayData.day}`;
-                daySection.className = "pt-8 pb-4 scroll-mt-[40vh]"; // scroll-mt 確保滾動時不被地圖遮住
+                daySection.className = "pt-8 pb-4 scroll-mt-[40vh]";
+                daySection.setAttribute('data-day', dayData.day); // 用來識別這區塊是哪一天
                 
-                // 天標題
                 daySection.innerHTML = `
                     <div class="mb-6 pl-2 border-l-4 border-red-500">
                         <h2 class="text-2xl font-bold text-gray-900">${dayData.title}</h2>
@@ -92,32 +121,32 @@
                 `;
                 mainContainer.appendChild(daySection);
 
-                // 3. 建立該天的行程卡片
                 const timelineContainer = daySection.querySelector(`#timeline-${dayData.day}`);
                 
+                // 3. 建立行程卡片
                 dayData.timeline.forEach((item, idx) => {
                     const uniqueId = `${dayData.day}-${idx}`;
                     
-                    // A. 地圖 Marker
                     if (item.location && item.location.lat) {
                         const latlng = [item.location.lat, item.location.lng];
                         allPathCoords.push(latlng);
-                        const marker = L.marker(latlng, {icon: createIcon('#EF4444')}).addTo(map);
+                        dayPathCoords.push(latlng);
+                        
+                        // 預設使用 defaultIcon (紅色)
+                        const marker = L.marker(latlng, {icon: defaultIcon}).addTo(map);
                         markers[uniqueId] = marker;
                     }
 
-                    // B. 卡片 HTML
                     const card = document.createElement('div');
-                    card.className = "timeline-item relative mb-12 pl-8 fade-in-section";
-                    card.setAttribute('data-uid', uniqueId); // 用來連動地圖
+                    card.className = "timeline-item relative mb-12 pl-8 fade-in-section border-l-4 border-transparent transition-all duration-300";
+                    card.setAttribute('data-uid', uniqueId);
+                    card.setAttribute('data-day-path', JSON.stringify(dayPathCoords)); // 存一下當天範圍
 
-                    // 照片
                     const photoHtml = item.photo ? 
                         `<div class="mb-3 rounded-xl overflow-hidden shadow-sm aspect-[4/3] relative">
                             <img src="${item.photo}" class="w-full h-full object-cover" loading="lazy">
                         </div>` : '';
                     
-                    // 筆記
                     const noteHtml = item.note ? 
                         `<div class="bg-yellow-50 p-3 rounded-lg text-sm text-gray-700 italic border border-yellow-100">
                             "${item.note}"
@@ -133,47 +162,90 @@
                         ${noteHtml}
                     `;
                     
+                    // 點擊卡片時：還是可以飛過去 (保留主動探索權)
                     card.addEventListener('click', () => {
-                        if (markers[uniqueId]) map.flyTo(markers[uniqueId].getLatLng(), 15, { duration: 1 });
+                        if (markers[uniqueId]) {
+                            map.panTo(markers[uniqueId].getLatLng()); // 改用 panTo 比較溫和
+                            highlightMarker(uniqueId);
+                        }
                     });
                     
                     timelineContainer.appendChild(card);
                 });
             });
 
-            // 畫出整趟路徑
-            if (allPathCoords.length > 1) {
-                L.polyline(allPathCoords, { color: '#EF4444', weight: 3, opacity: 0.6, dashArray: '5, 10' }).addTo(map);
-                map.fitBounds(L.latLngBounds(allPathCoords), { padding: [50, 50] });
+            // 初始：縮放到顯示全部路徑
+            if (allPathCoords.length > 0) {
+                // 稍微延遲一下確保渲染完成
+                setTimeout(() => {
+                    map.fitBounds(L.latLngBounds(allPathCoords), { padding: [50, 50] });
+                }, 100);
             }
         }
 
-        // --- 滾動監聽 (Highlighter) ---
+        // --- 核心邏輯：變色不移動 ---
+        function highlightMarker(targetUid) {
+            // 遍歷所有 Marker
+            Object.keys(markers).forEach(uid => {
+                const marker = markers[uid];
+                if (uid === targetUid) {
+                    // 選中的：變藍色、變大、移到最上層
+                    marker.setIcon(activeIcon);
+                    marker.setZIndexOffset(1000); 
+                } else {
+                    // 其他的：恢復紅色、變小、層級歸零
+                    marker.setIcon(defaultIcon);
+                    marker.setZIndexOffset(0);
+                }
+            });
+        }
+
+        // --- 滾動監聽 ---
         const observer = new IntersectionObserver((entries) => {
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
                     entry.target.classList.add('is-visible');
                     
-                    // 地圖連動
+                    // 1. 取得當前卡片的 ID
                     const uid = entry.target.getAttribute('data-uid');
-                    if (markers[uid]) map.flyTo(markers[uid].getLatLng(), 14, { duration: 1.5 });
+                    
+                    // 2. [變更] 只切換顏色，不移動地圖！
+                    if (markers[uid]) {
+                        highlightMarker(uid);
+                    }
 
-                    // 導覽列連動 (簡易判斷: 找這張卡片屬於哪一天)
+                    // 3. [優化] 當切換到「新的一天」時，自動調整地圖視野以適應那一天
+                    // 我們透過判斷這張卡片是否是該天的「第一張」來做
+                    /* (選用功能：如果你覺得切換天數時地圖也不要動，可以把下面這段註解掉。
+                        但我建議保留，因為 Day 1 和 Day 2 可能距離很遠，不切換視野會看不清楚)
+                    */
+                    /*
+                    const daySection = entry.target.closest('[id^="day-section-"]');
+                    const firstCard = daySection.querySelector('.timeline-item');
+                    if (entry.target === firstCard && markers[uid]) {
+                         // 這裡可以做比較大範圍的 fitBounds
+                    }
+                    */
+
+                    // 4. 導覽列連動
                     const daySection = entry.target.closest('[id^="day-section-"]');
                     if (daySection) {
                         const dayNum = daySection.id.split('-')[2];
                         document.querySelectorAll('.day-nav-item').forEach((btn, idx) => {
-                            // 這裡假設按鈕順序 = Day 順序 (Day 1, Day 2...)
                             if ((idx + 1) == dayNum) btn.classList.add('active');
                             else btn.classList.remove('active');
                         });
                     }
                 }
             });
-        }, { rootMargin: '-40% 0px -40% 0px' });
+        }, { 
+            rootMargin: '-40% 0px -40% 0px', // 判定線在螢幕中間
+            threshold: 0 
+        });
 
         document.querySelectorAll('.timeline-item').forEach(el => observer.observe(el));
 
     </script>
 </body>
+
 </html>
