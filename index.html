@@ -652,8 +652,8 @@
             };
             if(!isOpen) return null;
             return (
-                <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
-                    <div className="bg-white w-full p-6 rounded-t-3xl modal-enter" onClick={e=>e.stopPropagation()}>
+                <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+                    <div className="bg-white w-full p-6 pb-10 rounded-t-3xl modal-enter" onClick={e=>e.stopPropagation()}>
                         <h3 className="text-xl font-bold mb-4">新增 D{dayIndex} 景點</h3>
                         <input type="time" value={time} onChange={e=>setTime(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-3 font-mono"/>
                         <input type="text" placeholder="景點名稱" value={name} onChange={e=>setName(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-6" autoFocus/>
@@ -686,8 +686,8 @@
 
             if(!isOpen) return null;
             return (
-                <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
-                    <div className="bg-white w-full p-6 rounded-t-3xl modal-enter max-h-[80vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+                <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+                    <div className="bg-white w-full p-6 pb-10 rounded-t-3xl modal-enter max-h-[80vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-xl font-bold flex items-center gap-2"><Icon name="wallet"/> 記帳</h3>
                             <button onClick={onClose}><Icon name="x"/></button>
@@ -815,4 +815,5 @@
         root.render(<App />);
     </script>
 </body>
+
 </html>
