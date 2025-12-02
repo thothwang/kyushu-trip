@@ -1,17 +1,13 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <!-- iOS 桌面圖示 -->
-    <link rel="apple-touch-icon" href="icon.png">
-    <!-- 瀏覽器分頁小圖示 -->
-    <link rel="icon" type="image/png" href="icon.png">
-
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>九州八日賞楓行旅</title>
+    <title>九州八日賞楓行旅 (完整版)</title>
     
-    <!-- PWA 設定 -->
     <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon.png">
+    <link rel="icon" type="image/png" href="icon.png">
 
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -20,706 +16,797 @@
     <script src="https://unpkg.com/lucide@latest"></script>
     
     <style>
+        /* 基礎設定 */
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-        body { background-color: #f8f5f2; -webkit-tap-highlight-color: transparent; }
+        body { background-color: #f8f5f2; -webkit-tap-highlight-color: transparent; font-family: system-ui, -apple-system, sans-serif; }
+        
+        /* 動畫 */
+        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* Modal 動畫 */
+        .modal-enter { animation: modalUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        @keyframes modalUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+        /* iOS 風格切換開關 (Check-in Toggle) */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #10B981;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #10B981;
+        }
+        
+        /* 玻璃擬態導航列 */
         .glass-nav {
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
             border-top: 1px solid rgba(0,0,0,0.05);
         }
-        .card-shadow { box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
-        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-        
-        .recording-dot { animation: pulse-red 2s infinite; }
-        @keyframes pulse-red {
-            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
-            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-        }
-        
-        .modal-enter { animation: modalUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        @keyframes modalUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo, useRef } = React;
+        const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
-        // --- 設定與工具 ---
+        // --- 0. 資料庫設定 ---
         const DB_NAME = 'KyushuTripDB';
         const STORE_GPS = 'gps_logs';
         const STORE_PHOTOS = 'photos';
         const STORE_CUSTOM_SPOTS = 'custom_spots';
         const STORE_NOTES = 'spot_notes';
+        const STORE_CHECKINS = 'checkins';
+        const STORE_SPOT_STATUS = 'spot_status';
 
         const initDB = () => {
             return new Promise((resolve, reject) => {
-                const request = indexedDB.open(DB_NAME, 3);
-                request.onerror = (event) => console.error("DB Error", event);
+                const request = indexedDB.open(DB_NAME, 4);
+                request.onerror = (e) => console.error("DB Error", e);
                 request.onupgradeneeded = (event) => {
                     const db = event.target.result;
                     if (!db.objectStoreNames.contains(STORE_GPS)) db.createObjectStore(STORE_GPS, { keyPath: 'timestamp' });
                     if (!db.objectStoreNames.contains(STORE_PHOTOS)) db.createObjectStore(STORE_PHOTOS, { keyPath: 'id' });
                     if (!db.objectStoreNames.contains(STORE_CUSTOM_SPOTS)) db.createObjectStore(STORE_CUSTOM_SPOTS, { keyPath: 'id', autoIncrement: true });
                     if (!db.objectStoreNames.contains(STORE_NOTES)) db.createObjectStore(STORE_NOTES, { keyPath: 'id' });
+                    if (!db.objectStoreNames.contains(STORE_CHECKINS)) db.createObjectStore(STORE_CHECKINS, { keyPath: 'id' });
+                    if (!db.objectStoreNames.contains(STORE_SPOT_STATUS)) db.createObjectStore(STORE_SPOT_STATUS, { keyPath: 'id' });
                 };
-                request.onsuccess = (event) => resolve(event.target.result);
+                request.onsuccess = (e) => resolve(e.target.result);
             });
         };
 
+        // --- 1. 資料庫操作 (Promise 強化版) ---
         const dbOps = {
-            saveGPS: async (lat, lng) => {
+            put: async (storeName, data) => {
                 const db = await initDB();
-                db.transaction(STORE_GPS, 'readwrite').objectStore(STORE_GPS).add({ timestamp: Date.now(), lat, lng });
-            },
-            savePhoto: async (id, base64) => {
-                const db = await initDB();
-                db.transaction(STORE_PHOTOS, 'readwrite').objectStore(STORE_PHOTOS).put({ id, image: base64, timestamp: Date.now() });
-            },
-            getPhoto: async (id) => {
-                const db = await initDB();
-                return new Promise(r => {
-                    const req = db.transaction(STORE_PHOTOS, 'readonly').objectStore(STORE_PHOTOS).get(id);
-                    req.onsuccess = () => r(req.result?.image);
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction(storeName, 'readwrite');
+                    tx.objectStore(storeName).put(data);
+                    tx.oncomplete = () => resolve(true);
+                    tx.onerror = (e) => reject(e);
                 });
             },
-            deletePhoto: async (id) => {
+            get: async (storeName, key) => {
                 const db = await initDB();
-                const tx = db.transaction(STORE_PHOTOS, 'readwrite');
-                const store = tx.objectStore(STORE_PHOTOS);
-                store.delete(id);
                 return new Promise(resolve => {
-                    tx.oncomplete = () => resolve(true);
+                    const req = db.transaction(storeName, 'readonly').objectStore(storeName).get(key);
+                    req.onsuccess = () => resolve(req.result);
+                    req.onerror = () => resolve(null);
                 });
             },
-            saveNote: async (id, text) => {
+            getAll: async (storeName) => {
                 const db = await initDB();
-                const tx = db.transaction(STORE_NOTES, 'readwrite');
-                tx.objectStore(STORE_NOTES).put({ id, text, timestamp: Date.now() });
-                return new Promise((resolve) => {
-                    tx.oncomplete = () => resolve(true);
+                return new Promise(resolve => {
+                    const req = db.transaction(storeName, 'readonly').objectStore(storeName).getAll();
+                    req.onsuccess = () => resolve(req.result || []);
                 });
             },
-            getNote: async (id) => {
-                const db = await initDB();
-                return new Promise(r => {
-                    const req = db.transaction(STORE_NOTES, 'readonly').objectStore(STORE_NOTES).get(id);
-                    req.onsuccess = () => r(req.result?.text || '');
-                });
+            
+            saveGPS: async (lat, lng) => dbOps.put(STORE_GPS, { timestamp: Date.now(), lat, lng }),
+            savePhoto: async (id, base64) => dbOps.put(STORE_PHOTOS, { id, image: base64, timestamp: Date.now() }),
+            saveNote: async (id, text) => dbOps.put(STORE_NOTES, { id, text, timestamp: Date.now() }),
+            
+            saveCheckIn: async (id, lat, lng, time) => dbOps.put(STORE_CHECKINS, { id, timestamp: time || Date.now(), lat, lng }),
+            getCheckIn: async (id) => dbOps.get(STORE_CHECKINS, id),
+            deleteCheckIn: async (id) => {
+                 const db = await initDB();
+                 return new Promise(resolve => {
+                     const tx = db.transaction(STORE_CHECKINS, 'readwrite');
+                     tx.objectStore(STORE_CHECKINS).delete(id);
+                     tx.oncomplete = () => resolve(true);
+                 });
             },
+
+            setSpotStatus: async (id, status) => dbOps.put(STORE_SPOT_STATUS, { id, status }),
+            getSpotStatus: async (id) => dbOps.get(STORE_SPOT_STATUS, id),
+
             addCustomSpot: async (spot) => {
                 const db = await initDB();
-                return new Promise(r => {
-                    const req = db.transaction(STORE_CUSTOM_SPOTS, 'readwrite').objectStore(STORE_CUSTOM_SPOTS).add(spot);
-                    req.onsuccess = () => r(true);
+                return new Promise(resolve => {
+                    const tx = db.transaction(STORE_CUSTOM_SPOTS, 'readwrite');
+                    tx.objectStore(STORE_CUSTOM_SPOTS).add(spot);
+                    tx.oncomplete = () => resolve(true);
                 });
             },
-            getCustomSpots: async () => {
+            deleteCustomSpot: async (id) => {
                 const db = await initDB();
-                return new Promise(r => {
-                    const req = db.transaction(STORE_CUSTOM_SPOTS, 'readonly').objectStore(STORE_CUSTOM_SPOTS).getAll();
-                    req.onsuccess = () => r(req.result || []);
+                return new Promise(resolve => {
+                    const tx = db.transaction(STORE_CUSTOM_SPOTS, 'readwrite');
+                    tx.objectStore(STORE_CUSTOM_SPOTS).delete(id);
+                    tx.oncomplete = () => resolve(true);
                 });
             }
         };
 
-        const exportData = async () => {
-            const db = await initDB();
-            const getLogs = (store) => new Promise(r => {
-                const req = db.transaction(store, 'readonly').objectStore(store).getAll();
-                req.onsuccess = () => r(req.result);
-            });
-            const [gps, photos, customSpots, notes] = await Promise.all([
-                getLogs(STORE_GPS), getLogs(STORE_PHOTOS), getLogs(STORE_CUSTOM_SPOTS), getLogs(STORE_NOTES)
-            ]);
-            const expenses = JSON.parse(localStorage.getItem('trip_expenses') || '[]');
-            const data = { gps, photos, customSpots, notes, expenses, exportTime: new Date().toLocaleString() };
-            const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `kyushu_trip_backup_${new Date().toISOString().slice(0,10)}.json`;
-            a.click();
-        };
-
-        const calculateDistance = (lat1, lon1, lat2, lon2) => {
-            if (!lat1 || !lon1 || !lat2 || !lon2) return null;
-            const R = 6371;
-            const dLat = (lat2 - lat1) * Math.PI / 180;
-            const dLon = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            const d = R * c;
-            return d < 1 ? `${Math.round(d * 1000)}m` : `${d.toFixed(1)}km`;
-        };
-
-        // --- 完整行程資料 ---
+        // --- 2. 靜態行程資料 (已修復完整文字與年份) ---
         const tripData = [
             {
-                day: 1,
-                date: "11/29 (五)",
-                fullDate: "2024-11-29",
-                title: "秋月古城與銀杏",
-                weather: "陰時多雲 11°C",
-                image: "./images/1.jpg",
-                route: "熊本機場 → 太原銀杏 → 秋月城跡",
+                day: 1, date: "11/29 (五)", fullDate: "2025-11-29", title: "九州登陸與第一碗烏冬", weather: "晴時多雲 15°C", image: "./images/1.jpg",
                 locations: [
                     { time: "10:00", name: "熊本機場 (KMJ)", desc: "取車出發", type: "transport", lat: 32.8372, lng: 130.8569 },
                     { 
-                        time: "12:30", 
-                        name: "太原銀杏森林", 
-                        desc: "絕美金黃地毯", 
-                        type: "spot", 
-                        tags: ["必拍", "季節限定"], 
-                        link: "https://www.google.com/maps/search/?api=1&query=太原銀杏森林",
-                        lat: 33.2725, lng: 130.6389,
+                        time: "12:30", name: "太原銀杏森林", desc: "絕美金黃地毯", type: "spot", tags: ["必拍", "季節限定"], link: "https://www.google.com/maps/search/?api=1&query=太原銀杏森林", lat: 33.2725, lng: 130.6389,
                         details: "位於廣川町的私人銀杏林，只有在秋季紅葉期間才特別對外開放。這裡種植了約80棵低矮的銀杏樹，因為樹高較低，非常適合人像攝影。當落葉鋪滿地面時，就像走在一條金黃色的地毯上，是近年九州IG爆紅的秘境。"
                     },
                     { 
-                        time: "14:30", 
-                        name: "大興善寺", 
-                        desc: "紅葉階梯絕景", 
-                        type: "spot", 
-                        tags: ["紅葉名所"], 
-                        link: "https://www.google.com/maps/search/?api=1&query=大興善寺",
-                        lat: 33.4357, lng: 130.5367,
+                        time: "14:30", name: "大興善寺", desc: "紅葉階梯絕景", type: "spot", tags: ["紅葉名所"], link: "https://www.google.com/maps/search/?api=1&query=大興善寺", lat: 33.4357, lng: 130.5367,
                         details: "擁有1300年歷史的古老寺廟，位於佐賀與福岡的交界。從山腳下的停車場沿著參道走上去，會經過著名的「127段石階」，兩旁楓紅掩映，是攝影愛好者的最愛。寺後的「契園」種植了500多棵楓樹，與茅草屋頂的本堂相映成趣。"
                     },
                     { 
-                        time: "16:30", 
-                        name: "秋月城跡", 
-                        desc: "黑門與楓葉的對比", 
-                        type: "spot", 
-                        tags: ["小京都"], 
-                        link: "https://www.google.com/maps/search/?api=1&query=秋月城跡",
-                        lat: 33.4667, lng: 130.6942,
+                        time: "16:30", name: "秋月城跡", desc: "黑門與楓葉的對比", type: "spot", tags: ["小京都"], link: "https://www.google.com/maps/search/?api=1&query=秋月城跡", lat: 33.4667, lng: 130.6942,
                         details: "被稱為「筑前的小京都」，保留了江戶時代的城下町風貌。必看的是「黑門」，這原本是秋月城的正門，黑色的木造建築在周圍火紅楓葉的襯托下，顯得格外莊嚴美麗。建議可以在附近的茶屋品嚐葛餅。" 
                     },
-                ],
-                hotel: { name: "Akizuki OKO art+inn", price: 33000, link: "https://www.google.com/maps/search/?api=1&query=Akizuki+OKO" }
+                    { 
+                        time: "18:30", name: "Akizuki OKO art+inn", desc: "預算: ¥33,000", type: "hotel", tags: ["住宿"], link: "https://www.google.com/maps/search/?api=1&query=Akizuki+OKO", lat: 33.46, lng: 130.69,
+                        details: "今晚入住的藝術民宿。享受寧靜的秋月之夜。"
+                    }
+                ]
             },
             {
-                day: 2,
-                date: "11/30 (六)",
-                fullDate: "2024-11-30",
-                title: "福岡繁華巡禮",
-                weather: "多雲 14°C",
-                image: "./images/2.jpg",
+                day: 2, date: "11/30 (日)", fullDate: "2025-11-30", title: "福岡繁華巡禮", weather: "多雲 14°C", image: "./images/2.jpg",
                 locations: [
-                    { time: "11:30", name: "天神地下街", desc: "好逛好買", type: "shop", tags: ["伴手禮", "藥妝"], link: "https://www.google.com/maps/search/?api=1&query=天神地下街", lat: 33.5915, lng: 130.3989, details: "九州最大的地下購物中心，全長約600公尺，風格模仿19世紀歐洲街道，石板地與鑄鐵裝飾非常有氣氛。連接了各大百貨公司與地鐵站，集結了流行服飾、雜貨與必買伴手禮（如Bake Cheese Tart、鈴懸等）。" },
-                    { time: "13:30", name: "一蘭拉麵 總本店", desc: "福岡限定方碗", type: "food", tags: ["必吃", "排隊"], link: "https://www.google.com/maps/search/?api=1&query=一蘭拉麵總本店", lat: 33.5932, lng: 130.4046, details: "一蘭拉麵的總部大樓，只有在這裡可以用「方碗（重箱どんぶり）」吃拉麵，非常有儀式感。一樓是屋台風格座位，二樓以上則是經典的味集中座位。" },
-                    { time: "18:00", name: "中洲屋台", desc: "體驗在地夜生活", type: "food", tags: ["關東煮", "明太子"], link: "https://www.google.com/maps/search/?api=1&query=中洲屋台橫丁", lat: 33.5923, lng: 130.4069, details: "那珂川沿岸林立的屋台街是福岡的夜晚象徵。建議點一份博多著名的「明太子玉子燒」配上啤酒。如果不習慣路邊攤，也可以去運河城附近的餐廳。" },
-                ],
-                hotel: { name: "博多 RESOL TRINITY", price: 50000, link: "https://www.google.com/maps/search/?api=1&query=Hotel+Resol+Trinity+Hakata" }
-            },
-            {
-                day: 3,
-                date: "12/01 (日)",
-                fullDate: "2024-12-01",
-                title: "耶馬溪與別府",
-                weather: "晴天 12°C",
-                image: "./images/3.jpg",
-                locations: [
-                    { time: "11:30", name: "深耶馬溪", desc: "一目八景，奇岩與紅葉", type: "spot", tags: ["絕景"], link: "https://www.google.com/maps/search/?api=1&query=深耶馬溪一目八景", lat: 33.3725, lng: 131.0664, details: "耶馬溪是九州最著名的紅葉峽谷，其中「一目八景」是最精華的展望台，站在這裡可以一眼望盡周圍八座奇形怪狀的岩峰（如群猿山、仙人岩等）。秋季時，灰白的岩石與火紅的楓葉形成強烈對比，景色壯麗。" },
-                    { time: "14:00", name: "富貴寺", desc: "國寶大堂", type: "spot", tags: ["古剎"], link: "https://www.google.com/maps/search/?api=1&query=富貴寺", lat: 33.5414, lng: 131.5283, details: "九州現存最古老的木造建築之一，其「大堂」被指定為日本國寶。建築風格簡樸莊嚴，秋季時大堂周圍會被巨大的銀杏樹與楓葉包圍，金黃與朱紅落葉鋪滿庭院，呈現出極具禪意的平安時代美學。" },
-                    { time: "17:00", name: "別府溫泉", desc: "地獄蒸料理晚餐", type: "relax", tags: ["溫泉"], link: "https://www.google.com/maps/search/?api=1&query=別府溫泉", lat: 33.2800, lng: 131.5000, details: "日本湧泉量第一的溫泉地，整個城市隨處可見溫泉蒸氣（湯煙）冒出。除了著名的地獄巡禮，這裡的溫泉泉質多樣。您入住的海景溫泉可以一邊泡湯一邊眺望別府灣，是消除長途駕駛疲勞的最佳享受。"},
-                ],
-                hotel: { name: "別府 Airbnb", price: 23000, link: "" }
-            },
-            {
-                day: 4,
-                date: "12/02 (一)",
-                fullDate: "2024-12-02",
-                title: "由布院童話散策",
-                weather: "陰時多雲 11°C",
-                image: "./images/4.jpg",
-                locations: [
-                    { time: "11:00", name: "別府海鮮市場", desc: "午餐吃新鮮海鮮", type: "food", tags: ["海鮮丼"], link: "", lat: 33.3000, lng: 131.5000, details: "位於別府灣旁，提供最新鮮的豐後水道海產。推薦品嚐大分縣特產「關鯖魚」與「關竹莢魚」，肉質緊實鮮甜。也可以選擇海鮮燒烤或豪邁的海鮮丼飯作為午餐。" },
-                    { time: "14:30", name: "湯之坪街道", desc: "史努比茶屋、童話村", type: "walk", tags: ["好逛"], link: "https://www.google.com/maps/search/?api=1&query=湯之坪街道", lat: 33.2667, lng: 131.3583, details: "連接由布院車站與金鱗湖的主要街道，兩旁林立著各式特色小店、雜貨舖與甜點店。必訪的「Yufuin Floral Village」是仿照英國科茨沃爾德打造的童話村，充滿哈利波特般的氛圍，非常適合拍照。" },
-                    { time: "15:00", name: "Milch 起司蛋糕", desc: "必吃熱起司蛋糕", type: "food", tags: ["必吃甜點"], link: "https://www.google.com/maps/search/?api=1&query=Milch由布院", lat: 33.2650, lng: 131.3570, details: "曾獲得世界金賞的甜點名店。招牌「Kase Kuchen」半熟起司蛋糕，有熱吃與冷吃兩種口感。推薦嘗試熱的，用湯匙挖下去，中間濃郁的起司內餡會緩緩流出，奶香濃郁且不膩口。" },
-                    { time: "16:00", name: "金麟湖", desc: "湖上鳥居", type: "spot", tags: ["拍照"], link: "https://www.google.com/maps/search/?api=1&query=金麟湖", lat: 33.2625, lng: 131.3620, details: "由布院的象徵，湖底同時湧出溫泉與清水，因此在秋冬的清晨，湖面會因為溫差飄散著夢幻的白色晨霧（朝霧）。湖畔的「天祖神社」水上鳥居與楓葉倒影，是早起散步才能看到的絕景。"},
-                ],
-                hotel: { name: "由布院 Airbnb", price: 40200, link: "" }
-            },
-            {
-                day: 5,
-                date: "12/03 (二)",
-                fullDate: "2024-12-03",
-                title: "黑川溫泉秘境",
-                weather: "陰天 7°C/1°C",
-                image: "./images/5.jpg",
-                locations: [
-                    { time: "09:00", name: "B-speak", desc: "排隊買生乳捲", type: "food", tags: ["限量"], link: "https://www.google.com/maps/search/?api=1&query=B-speak", lat: 33.2645, lng: 131.3550, details: "由布院溫泉旅館「山莊 無量塔」開設的蛋糕捲專賣店。堅持不添加人工香料，海綿蛋糕蓬鬆濕潤，鮮奶油甜度適中且清爽。因為非常搶手，通常建議開店前就去排隊，或購買切片裝在車上享用。" },
-                    { time: "12:30", name: "鍋ヶ滝 瀑布", desc: "可進入內部的瀑布", type: "spot", tags: ["秘境"], link: "https://www.google.com/maps/search/?api=1&query=鍋ヶ滝", lat: 33.1167, lng: 131.0250, details: "因茶飲廣告而聲名大噪的景點。最大的特色是可以走到瀑布的「背面」，從水簾後方往外看，陽光穿透水珠與樹林的景色非常夢幻。瀑布寬約20公尺，落差不大但姿態優雅。" },
-                    { time: "14:30", name: "黑川溫泉", desc: "購買入湯手形泡湯", type: "relax", tags: ["米其林二星"], link: "https://www.google.com/maps/search/?api=1&query=黑川溫泉", lat: 33.0783, lng: 131.1394, details: "被米其林綠色指南評為二星的溫泉地。這裡為了維護景觀，全區建築風格統一，充滿濃厚的江戶色彩。利用「入湯手形」可以任選三家旅館的露天溫泉體驗。推薦品嚐溫泉街上的「Patisserie Roku」生乳泡芙，外皮酥脆內餡飽滿。" },
-                ],
-                hotel: { name: "山みず木", price: 105600, link: "https://www.google.com/maps/search/?api=1&query=山みず木" }
-            },
-            {
-                day: 6,
-                date: "12/04 (三)",
-                fullDate: "2024-12-04",
-                title: "阿蘇火山與神話",
-                weather: "晴朗 6°C/-4°C",
-                image: "./images/6.jpg",
-                locations: [
-                    { time: "12:30", name: "阿蘇大觀峰", desc: "眺望涅槃像", type: "spot", tags: ["壯觀"], link: "https://www.google.com/maps/search/?api=1&query=阿蘇大觀峰", lat: 33.0333, lng: 131.0833, details: "位於九重連山與阿蘇山之間的高原甜點店。店內招牌是年輪蛋糕與瑞士捲。最棒的是可以在露台座位區，一邊享用精緻甜點，一邊眺望阿蘇五岳的壯闊全景，是自駕途中的最佳休息站。" },
-                    { time: "13:30", name: "草千里", desc: "騎馬體驗", type: "spot", tags: [], link: "https://www.google.com/maps/search/?api=1&query=草千里", lat: 32.8842, lng: 131.0514, details: "位於烏帽子岳北麓的一片巨大圓形草原，原本是火山口遺跡。中央有兩個雨水形成的池塘，可以清楚看到仍在冒煙的中岳火山口。這裡可以體驗騎馬散步，景色開闊壯麗，是阿蘇最具代表性的景點。" },
-                    { time: "16:00", name: "高千穗神社", desc: "夜神樂", type: "spot", tags: ["神話"], link: "https://www.google.com/maps/search/?api=1&query=高千穗神社", lat: 32.7100, lng: 131.3000, details: "約1900年前創建的古老神社，是高千穗鄉八十八社的總社。境內有樹齡超過800年的「秩父杉」與兩棵根部相連的「夫婦杉」，據說牽手繞行三圈能保佑姻緣美滿。每晚這裡也會舉辦演繹神話故事的「夜神樂」。" },
-                ],
-                hotel: { name: "Hotel Takachiho", price: 65600, link: "https://www.google.com/maps/search/?api=1&query=Hotel+Takachiho" }
-            },
-            {
-                day: 7,
-                date: "12/05 (四)",
-                fullDate: "2024-12-05",
-                title: "高千穗划船",
-                weather: "多雲時晴 10°C/-2°C",
-                image: "./images/7.jpg",
-                locations: [
-                    { time: "09:00", name: "高千穗峽", desc: "峽谷划船 (記得預約)", type: "spot", tags: ["必去", "預約"], link: "https://www.google.com/maps/search/?api=1&query=高千穗峽", lat: 32.7050, lng: 131.3000, details: "由阿蘇火山噴發的熔岩急遽冷卻後形成的柱狀節理峽谷。最經典的玩法是划船近距離觀賞「真名井瀑布」，瀑布從17公尺高的峭壁傾瀉而下，水氣與光影交錯，宛如進入神話世界。" },
-                    { time: "12:00", name: "高千穗牛燒肉 和", desc: "頂級和牛午餐", type: "food", tags: ["必吃"], link: "https://www.google.com/maps/search/?api=1&query=高千穗牛燒肉和", lat: 32.7100, lng: 131.3050, details: "曾獲得「日本一」殊榮的高千穗牛，以脂肪分布均勻、口感不油膩著稱。這家餐廳是JA（農會）直營，能以相對實惠的價格吃到最高品質的牛肉。午餐時段的牛排套餐CP值非常高。" },
+                    { 
+                        time: "11:30", name: "天神地下街", desc: "好逛好買", type: "shop", tags: ["伴手禮", "藥妝"], link: "https://www.google.com/maps/search/?api=1&query=天神地下街", lat: 33.5915, lng: 130.3989, 
+                        details: "九州最大的地下購物中心，全長約600公尺，風格模仿19世紀歐洲街道，石板地與鑄鐵裝飾非常有氣氛。連接了各大百貨公司與地鐵站，集結了流行服飾、雜貨與必買伴手禮（如Bake Cheese Tart、鈴懸等）。" 
+                    },
+                    { 
+                        time: "13:30", name: "一蘭拉麵 總本店", desc: "福岡限定方碗", type: "food", tags: ["必吃", "排隊"], link: "https://www.google.com/maps/search/?api=1&query=一蘭拉麵總本店", lat: 33.5932, lng: 130.4046, 
+                        details: "一蘭拉麵的總部大樓，只有在這裡可以用「方碗（重箱どんぶり）」吃拉麵，非常有儀式感。一樓是屋台風格座位，二樓以上則是經典的味集中座位。" 
+                    },
+                    { 
+                        time: "18:00", name: "中洲屋台", desc: "體驗在地夜生活", type: "food", tags: ["關東煮", "明太子"], link: "https://www.google.com/maps/search/?api=1&query=中洲屋台橫丁", lat: 33.5923, lng: 130.4069, 
+                        details: "那珂川沿岸林立的屋台街是福岡的夜晚象徵。建議點一份博多著名的「明太子玉子燒」配上啤酒。如果不習慣路邊攤，也可以去運河城附近的餐廳。" 
+                    },
                     {
-                        time: "15:30",
-                        name: "水前寺成趣園",
-                        desc: "縮小版的東海道五十三次",
-                        type: "spot",
-                        tags: ["庭園", "散步"],
-                        link: "https://www.google.com/maps/search/?api=1&query=水前寺成趣園",
-                        lat: 32.7900, lng: 130.7300,
+                        time: "20:00", name: "博多 RESOL TRINITY", desc: "預算: ¥50,000", type: "hotel", tags: ["住宿"], link: "https://www.google.com/maps/search/?api=1&query=Hotel+Resol+Trinity+Hakata", lat: 33.593, lng: 130.405,
+                        details: "位於中洲川端的高級飯店，頂樓設有大浴場，可以消除一整天逛街的疲勞。"
+                    }
+                ]
+            },
+            {
+                day: 3, date: "12/01 (一)", fullDate: "2025-12-01", title: "耶馬溪與別府", weather: "晴天 12°C", image: "./images/3.jpg",
+                locations: [
+                    { 
+                        time: "11:30", name: "深耶馬溪", desc: "一目八景，奇岩與紅葉", type: "spot", tags: ["絕景"], link: "https://www.google.com/maps/search/?api=1&query=深耶馬溪一目八景", lat: 33.3725, lng: 131.0664, 
+                        details: "耶馬溪是九州最著名的紅葉峽谷，其中「一目八景」是最精華的展望台，站在這裡可以一眼望盡周圍八座奇形怪狀的岩峰（如群猿山、仙人岩等）。秋季時，灰白的岩石與火紅的楓葉形成強烈對比，景色壯麗。" 
+                    },
+                    { 
+                        time: "14:00", name: "富貴寺", desc: "國寶大堂", type: "spot", tags: ["古剎"], link: "https://www.google.com/maps/search/?api=1&query=富貴寺", lat: 33.5414, lng: 131.5283, 
+                        details: "九州現存最古老的木造建築之一，其「大堂」被指定為日本國寶。建築風格簡樸莊嚴，秋季時大堂周圍會被巨大的銀杏樹與楓葉包圍，金黃與朱紅落葉鋪滿庭院，呈現出極具禪意的平安時代美學。" 
+                    },
+                    { 
+                        time: "17:00", name: "別府溫泉", desc: "地獄蒸料理晚餐", type: "relax", tags: ["溫泉"], link: "https://www.google.com/maps/search/?api=1&query=別府溫泉", lat: 33.2800, lng: 131.5000, 
+                        details: "日本湧泉量第一的溫泉地，整個城市隨處可見溫泉蒸氣（湯煙）冒出。除了著名的地獄巡禮，這裡的溫泉泉質多樣。您入住的海景溫泉可以一邊泡湯一邊眺望別府灣，是消除長途駕駛疲勞的最佳享受。"
+                    },
+                    {
+                        time: "19:00", name: "別府 Airbnb", desc: "預算: ¥23,000", type: "hotel", tags: ["住宿"], link: "", lat: 33.28, lng: 131.50,
+                        details: "體驗當地生活的 Airbnb 住宿。"
+                    }
+                ]
+            },
+            {
+                day: 4, date: "12/02 (二)", fullDate: "2025-12-02", title: "由布院童話散策", weather: "陰時多雲 11°C", image: "./images/4.jpg",
+                locations: [
+                    { 
+                        time: "11:00", name: "別府海鮮市場", desc: "午餐吃新鮮海鮮", type: "food", tags: ["海鮮丼"], link: "", lat: 33.3000, lng: 131.5000, 
+                        details: "位於別府灣旁，提供最新鮮的豐後水道海產。推薦品嚐大分縣特產「關鯖魚」與「關竹莢魚」，肉質緊實鮮甜。也可以選擇海鮮燒烤或豪邁的海鮮丼飯作為午餐。" 
+                    },
+                    { 
+                        time: "14:30", name: "湯之坪街道", desc: "史努比茶屋、童話村", type: "walk", tags: ["好逛"], link: "https://www.google.com/maps/search/?api=1&query=湯之坪街道", lat: 33.2667, lng: 131.3583, 
+                        details: "連接由布院車站與金鱗湖的主要街道，兩旁林立著各式特色小店、雜貨舖與甜點店。必訪的「Yufuin Floral Village」是仿照英國科茨沃爾德打造的童話村，充滿哈利波特般的氛圍，非常適合拍照。" 
+                    },
+                    { 
+                        time: "15:00", name: "Milch 起司蛋糕", desc: "必吃熱起司蛋糕", type: "food", tags: ["必吃甜點"], link: "https://www.google.com/maps/search/?api=1&query=Milch由布院", lat: 33.2650, lng: 131.3570, 
+                        details: "曾獲得世界金賞的甜點名店。招牌「Kase Kuchen」半熟起司蛋糕，有熱吃與冷吃兩種口感。推薦嘗試熱的，用湯匙挖下去，中間濃郁的起司內餡會緩緩流出，奶香濃郁且不膩口。" 
+                    },
+                    { 
+                        time: "16:00", name: "金麟湖", desc: "湖上鳥居", type: "spot", tags: ["拍照"], link: "https://www.google.com/maps/search/?api=1&query=金麟湖", lat: 33.2625, lng: 131.3620, 
+                        details: "由布院的象徵，湖底同時湧出溫泉與清水，因此在秋冬的清晨，湖面會因為溫差飄散著夢幻的白色晨霧（朝霧）。湖畔的「天祖神社」水上鳥居與楓葉倒影，是早起散步才能看到的絕景。"
+                    },
+                    {
+                        time: "18:00", name: "由布院 Airbnb", desc: "預算: ¥40,200", type: "hotel", tags: ["住宿"], link: "", lat: 33.26, lng: 131.36,
+                        details: "由布院當地的特色民宿。"
+                    }
+                ]
+            },
+            {
+                day: 5, date: "12/03 (三)", fullDate: "2025-12-03", title: "黑川溫泉秘境", weather: "陰天 7°C/1°C", image: "./images/5.jpg",
+                locations: [
+                    { 
+                        time: "09:00", name: "B-speak", desc: "排隊買生乳捲", type: "food", tags: ["限量"], link: "https://www.google.com/maps/search/?api=1&query=B-speak", lat: 33.2645, lng: 131.3550, 
+                        details: "由布院溫泉旅館「山莊 無量塔」開設的蛋糕捲專賣店。堅持不添加人工香料，海綿蛋糕蓬鬆濕潤，鮮奶油甜度適中且清爽。因為非常搶手，通常建議開店前就去排隊，或購買切片裝在車上享用。" 
+                    },
+                    { 
+                        time: "12:30", name: "鍋ヶ滝 瀑布", desc: "可進入內部的瀑布", type: "spot", tags: ["秘境"], link: "https://www.google.com/maps/search/?api=1&query=鍋ヶ滝", lat: 33.1167, lng: 131.0250, 
+                        details: "因茶飲廣告而聲名大噪的景點。最大的特色是可以走到瀑布的「背面」，從水簾後方往外看，陽光穿透水珠與樹林的景色非常夢幻。瀑布寬約20公尺，落差不大但姿態優雅。" 
+                    },
+                    { 
+                        time: "14:30", name: "黑川溫泉", desc: "購買入湯手形泡湯", type: "relax", tags: ["米其林二星"], link: "https://www.google.com/maps/search/?api=1&query=黑川溫泉", lat: 33.0783, lng: 131.1394, 
+                        details: "被米其林綠色指南評為二星的溫泉地。這裡為了維護景觀，全區建築風格統一，充滿濃厚的江戶色彩。利用「入湯手形」可以任選三家旅館的露天溫泉體驗。推薦品嚐溫泉街上的「Patisserie Roku」生乳泡芙，外皮酥脆內餡飽滿。" 
+                    },
+                    {
+                        time: "17:00", name: "山みず木", desc: "預算: ¥105,600", type: "hotel", tags: ["住宿", "溫泉"], link: "https://www.google.com/maps/search/?api=1&query=山みず木", lat: 33.08, lng: 131.14,
+                        details: "黑川溫泉的頂級旅館，擁有溪流旁的絕美露天溫泉。"
+                    }
+                ]
+            },
+            {
+                day: 6, date: "12/04 (四)", fullDate: "2025-12-04", title: "阿蘇火山與神話", weather: "晴朗 6°C/-4°C", image: "./images/6.jpg",
+                locations: [
+                    { 
+                        time: "12:30", name: "阿蘇大觀峰", desc: "眺望涅槃像", type: "spot", tags: ["壯觀"], link: "https://www.google.com/maps/search/?api=1&query=阿蘇大觀峰", lat: 33.0333, lng: 131.0833, 
+                        details: "位於九重連山與阿蘇山之間的高原甜點店。店內招牌是年輪蛋糕與瑞士捲。最棒的是可以在露台座位區，一邊享用精緻甜點，一邊眺望阿蘇五岳的壯闊全景，是自駕途中的最佳休息站。" 
+                    },
+                    { 
+                        time: "13:30", name: "草千里", desc: "騎馬體驗", type: "spot", tags: [], link: "https://www.google.com/maps/search/?api=1&query=草千里", lat: 32.8842, lng: 131.0514, 
+                        details: "位於烏帽子岳北麓的一片巨大圓形草原，原本是火山口遺跡。中央有兩個雨水形成的池塘，可以清楚看到仍在冒煙的中岳火山口。這裡可以體驗騎馬散步，景色開闊壯麗，是阿蘇最具代表性的景點。" 
+                    },
+                    { 
+                        time: "16:00", name: "高千穗神社", desc: "夜神樂", type: "spot", tags: ["神話"], link: "https://www.google.com/maps/search/?api=1&query=高千穗神社", lat: 32.7100, lng: 131.3000, 
+                        details: "約1900年前創建的古老神社，是高千穗鄉八十八社的總社。境內有樹齡超過800年的「秩父杉」與兩棵根部相連的「夫婦杉」，據說牽手繞行三圈能保佑姻緣美滿。每晚這裡也會舉辦演繹神話故事的「夜神樂」。" 
+                    },
+                    {
+                        time: "18:00", name: "Hotel Takachiho", desc: "預算: ¥65,600", type: "hotel", tags: ["住宿"], link: "https://www.google.com/maps/search/?api=1&query=Hotel+Takachiho", lat: 32.71, lng: 131.30,
+                        details: "高千穗當地的舒適飯店。"
+                    }
+                ]
+            },
+            {
+                day: 7, date: "12/05 (五)", fullDate: "2025-12-05", title: "高千穗划船", weather: "多雲時晴 10°C/-2°C", image: "./images/7.jpg",
+                locations: [
+                    { 
+                        time: "09:00", name: "高千穗峽", desc: "峽谷划船 (記得預約)", type: "spot", tags: ["必去", "預約"], link: "https://www.google.com/maps/search/?api=1&query=高千穗峽", lat: 32.7050, lng: 131.3000, 
+                        details: "由阿蘇火山噴發的熔岩急遽冷卻後形成的柱狀節理峽谷。最經典的玩法是划船近距離觀賞「真名井瀑布」，瀑布從17公尺高的峭壁傾瀉而下，水氣與光影交錯，宛如進入神話世界。" 
+                    },
+                    { 
+                        time: "12:00", name: "高千穗牛燒肉 和", desc: "頂級和牛午餐", type: "food", tags: ["必吃"], link: "https://www.google.com/maps/search/?api=1&query=高千穗牛燒肉和", lat: 32.7100, lng: 131.3050, 
+                        details: "曾獲得「日本一」殊榮的高千穗牛，以脂肪分布均勻、口感不油膩著稱。這家餐廳是JA（農會）直營，能以相對實惠的價格吃到最高品質的牛肉。午餐時段的牛排套餐CP值非常高。" 
+                    },
+                    {
+                        time: "15:30", name: "水前寺成趣園", desc: "縮小版的東海道五十三次", type: "spot", tags: ["庭園", "散步"], link: "https://www.google.com/maps/search/?api=1&query=水前寺成趣園", lat: 32.7900, lng: 130.7300,
                         details: "熊本藩主細川家歷經三代建造的桃山式迴遊庭園。庭園設計模仿了東海道五十三次的景色，其中最著名的就是模仿「富士山」的假山。池水引自阿蘇伏流水，清澈見底。秋季時庭園內的楓樹與松樹相互輝映，景色優雅。"
                     },
                     {
-                        time: "16:30",
-                        name: "海賊王魯夫雕像",
-                        desc: "航海王粉絲聖地",
-                        type: "spot",
-                        tags: ["動漫", "銀杏"],
-                        link: "https://www.google.com/maps/search/?api=1&query=熊本縣廳+魯夫像",
-                        lat: 32.7950, lng: 130.7400,
+                        time: "16:30", name: "海賊王魯夫雕像", desc: "航海王粉絲聖地", type: "spot", tags: ["動漫", "銀杏"], link: "https://www.google.com/maps/search/?api=1&query=熊本縣廳+魯夫像", lat: 32.7950, lng: 130.7400,
                         details: "位於熊本縣廳散步道上，是為了感謝作者尾田榮一郎對熊本地震復興的貢獻而設立。這尊魯夫銅像還原度極高。秋季造訪時，縣廳前的兩排銀杏大道會變成金黃色，剛好成為魯夫身後最壯觀的背景。"
+                    },
+                    {
+                        time: "18:00", name: "三井花園飯店 熊本", desc: "預算: ¥38,000", type: "hotel", tags: ["住宿"], link: "https://www.google.com/maps/search/?api=1&query=三井花園飯店熊本", lat: 32.79, lng: 130.73,
+                        details: "熊本市區的便利住宿，設有熊本熊主題房。"
                     }
-                ],
-                hotel: { name: "三井花園飯店 熊本", price: 38000, link: "https://www.google.com/maps/search/?api=1&query=三井花園飯店熊本" }
+                ]
             },
              {
-                day: 8,
-                date: "12/06 (五)",
-                fullDate: "2024-12-06",
-                title: "返台",
-                weather: "晴 10°C/-6°C",
-                image: "./images/8.jpg",
+                day: 8, date: "12/06 (六)", fullDate: "2025-12-06", title: "返台", weather: "晴 10°C/-6°C", image: "./images/8.jpg",
                 locations: [
                     { time: "11:30", name: "熊本機場", desc: "還車、最後採買", type: "transport", tags: [], link: "https://www.google.com/maps/search/?api=1&query=熊本機場", lat: 32.8372, lng: 130.8569 },
-                ],
-                hotel: null
+                ]
             }
         ];
 
-        // --- 組件 ---
-        // 修正 Icon 組件，使用 React 的 dangerouslySetInnerHTML 來確保渲染
+        // --- 3. 元件 ---
         const Icon = ({ name, size = 18, className }) => {
-            const [iconHtml, setIconHtml] = useState('');
-            
+            const [html, setHtml] = useState('');
             useEffect(() => {
                 if (window.lucide && window.lucide.icons) {
-                    const iconKey = name.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join('');
-                    const iconNode = window.lucide.icons[iconKey] || window.lucide.icons.CircleHelp;
-                    
-                    const temp = document.createElement('div');
-                    const iconElement = window.lucide.createElement(iconNode);
-                    iconElement.setAttribute('width', size);
-                    iconElement.setAttribute('height', size);
-                    if(className) iconElement.setAttribute('class', className);
-                    temp.appendChild(iconElement);
-                    setIconHtml(temp.innerHTML);
+                    const iconNode = window.lucide.icons[name.split('-').map(p=>p.charAt(0).toUpperCase()+p.slice(1)).join('')] || window.lucide.icons.CircleHelp;
+                    const el = window.lucide.createElement(iconNode);
+                    el.setAttribute('width', size); el.setAttribute('height', size);
+                    if(className) el.setAttribute('class', className);
+                    const t = document.createElement('div'); t.appendChild(el); setHtml(t.innerHTML);
                 }
             }, [name, size, className]);
-
-            return <span dangerouslySetInnerHTML={{ __html: iconHtml }} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }} />;
+            return <span dangerouslySetInnerHTML={{ __html: html }} className="inline-flex items-center justify-center" />;
         };
 
-        const Tag = ({ text }) => <span className={`text-[10px] px-2 py-1 rounded-full font-bold mr-1 bg-gray-100 text-gray-600`}>{text}</span>;
-
-        // 記帳 Modal
-        const ExpenseModal = ({ isOpen, onClose, defaultName, defaultDate }) => {
-            const [name, setName] = useState('');
-            const [amount, setAmount] = useState('');
-            const [cat, setCat] = useState('food');
-
-            useEffect(() => { 
-                if(isOpen && defaultName) setName(defaultName); 
-            }, [isOpen, defaultName]);
-
-            const handleSave = () => {
-                const dateToUse = defaultDate || new Date().toLocaleDateString();
-                const newItem = { 
-                    id: Date.now(), 
-                    name, 
-                    amount: parseInt(amount), 
-                    category: cat, 
-                    date: dateToUse, 
-                    location: defaultName 
-                };
-                const saved = JSON.parse(localStorage.getItem('trip_expenses') || '[]');
-                localStorage.setItem('trip_expenses', JSON.stringify([newItem, ...saved]));
-                onClose();
-                alert(`已記錄於 ${dateToUse}：${name} ¥${amount}`);
-                setName(''); setAmount('');
-            };
-
-            if (!isOpen) return null;
-
-            return (
-                <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
-                    <div className="bg-white w-full max-w-md p-5 rounded-t-3xl sm:rounded-2xl modal-enter shadow-2xl" onClick={e => e.stopPropagation()}>
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                                <Icon name="wallet" /> 記帳 {defaultDate && <span className="text-sm font-normal text-gray-500">({defaultDate})</span>}
-                            </h3>
-                            <button onClick={onClose}><Icon name="x" /></button>
-                        </div>
-                        <input type="text" placeholder="項目" value={name} onChange={e => setName(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-3 text-lg font-bold" />
-                        <input type="number" placeholder="¥ 金額" value={amount} onChange={e => setAmount(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-4 text-lg font-mono" autoFocus />
-                        <div className="flex gap-2 mb-6">
-                            {['food','transport','shop','other'].map(c => (
-                                <button key={c} onClick={() => setCat(c)} className={`flex-1 py-2 rounded-lg text-sm font-bold ${cat===c ? 'bg-orange-500 text-white' : 'bg-gray-100 text-gray-400'}`}>
-                                    {c==='food'?'餐飲':c==='transport'?'交通':c==='shop'?'購物':'其他'}
-                                </button>
-                            ))}
-                        </div>
-                        <button onClick={handleSave} disabled={!name || !amount} className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold text-lg disabled:opacity-50">確認儲存</button>
+        const ToggleCheckIn = ({ isChecked, onChange }) => (
+            <label className="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" className="sr-only toggle-checkbox" checked={isChecked} onChange={onChange} />
+                <div className={`w-14 h-8 rounded-full shadow-inner transition-colors duration-300 ease-in-out flex items-center px-1 ${isChecked ? 'bg-green-500' : 'bg-gray-200'}`}>
+                    <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 ease-in-out flex items-center justify-center ${isChecked ? 'translate-x-6' : 'translate-x-0'}`}>
+                        {isChecked ? <Icon name="check" size={14} className="text-green-500" /> : <Icon name="map-pin" size={14} className="text-gray-400" />}
                     </div>
                 </div>
-            );
-        };
+                <span className="ml-2 text-xs font-bold text-gray-500">{isChecked ? '已抵達' : '打卡'}</span>
+            </label>
+        );
 
-        // 新增景點 Modal
-        const AddSpotModal = ({ isOpen, onClose, dayIndex, dayDate, userLocation, onAdded }) => {
-            const [name, setName] = useState('');
-            const [time, setTime] = useState(() => {
-                const now = new Date();
-                return `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+        // --- 4. 核心功能: 匯出與資料處理 ---
+        const exportData = async () => {
+            const [gps, photos, customSpots, notes, checkins, spotStatus] = await Promise.all([
+                dbOps.getAll(STORE_GPS), dbOps.getAll(STORE_PHOTOS), dbOps.getAll(STORE_CUSTOM_SPOTS),
+                dbOps.getAll(STORE_NOTES), dbOps.getAll(STORE_CHECKINS), dbOps.getAll(STORE_SPOT_STATUS)
+            ]);
+            const expenses = JSON.parse(localStorage.getItem('trip_expenses') || '[]');
+
+            let timeline = [];
+            const checkinMap = Object.fromEntries(checkins.map(c => [c.id, c]));
+            const statusMap = Object.fromEntries(spotStatus.map(s => [s.id, s.status]));
+
+            // A. 原本行程
+            tripData.forEach(day => day.locations.forEach(loc => {
+                const id = `${day.day}_${loc.name}`;
+                timeline.push({
+                    ...loc,
+                    id, dayIndex: day.day, isCustom: false,
+                    status: statusMap[id] || 'active',
+                    checkIn: checkinMap[id] || null
+                });
+            }));
+
+            // B. 自訂行程
+            customSpots.forEach(spot => {
+                const id = `${spot.dayIndex}_${spot.name}`;
+                timeline.push({
+                    ...spot,
+                    id, isCustom: true,
+                    status: 'active',
+                    checkIn: checkinMap[id] || null
+                });
             });
 
-            const handleSave = async () => {
-                if (!name) return;
-                await dbOps.addCustomSpot({
-                    name, time, type: 'custom', desc: '手動新增景點',
-                    dayIndex, 
-                    lat: userLocation?.lat, lng: userLocation?.lng,
-                    isCustom: true
-                });
-                onAdded();
-                onClose();
-                setName('');
+            // C. 排序
+            timeline.sort((a, b) => {
+                if (a.dayIndex !== b.dayIndex) return a.dayIndex - b.dayIndex;
+                const timeA = a.checkIn ? new Date(a.checkIn.timestamp).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) : a.time;
+                const timeB = b.checkIn ? new Date(b.checkIn.timestamp).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) : b.time;
+                return (timeA || '23:59').localeCompare(timeB || '23:59');
+            });
+
+            const data = { 
+                meta: { title: "九州八日賞楓行旅", exportTime: new Date().toLocaleString() },
+                timeline, gps, photos, notes, expenses,
+                raw: { customSpots, checkins, spotStatus } 
             };
-
-            if (!isOpen) return null;
-
-            return (
-                <div className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
-                    <div className="bg-white w-full max-w-md p-5 rounded-t-3xl sm:rounded-2xl modal-enter shadow-2xl" onClick={e => e.stopPropagation()}>
-                        <h3 className="text-xl font-bold text-gray-800 mb-2">📍 新增中途景點</h3>
-                        <p className="text-sm text-gray-500 mb-4 bg-gray-100 p-2 rounded-lg inline-block">
-                            Day {dayIndex} · {dayDate}
-                        </p>
-                        <input type="time" value={time} onChange={e=>setTime(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-3 font-mono" />
-                        <input type="text" placeholder="景點名稱 (如: 路邊展望台)" value={name} onChange={e=>setName(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-4" autoFocus />
-                        <p className="text-xs text-gray-400 mb-4"><Icon name="map-pin" size={12} className="inline"/> 將自動記錄當前 GPS 位置</p>
-                        <button onClick={handleSave} className="w-full bg-[#e85a4f] text-white py-3 rounded-xl font-bold text-lg">新增至行程</button>
-                    </div>
-                </div>
-            );
+            
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `kyushu_full_backup_${new Date().toISOString().slice(0,10)}.json`; a.click();
         };
 
-        const LocationCard = ({ loc, userLocation, day, onExpense }) => {
+        // --- 5. Location Card ---
+        const LocationCard = ({ loc, day, userLocation, onExpense, onUpdate }) => {
             const [isExpanded, setIsExpanded] = useState(false);
             const [photo, setPhoto] = useState(null);
-            const [showNoteInput, setShowNoteInput] = useState(false);
             const [note, setNote] = useState('');
+            const [showNoteInput, setShowNoteInput] = useState(false);
+            const [checkIn, setCheckIn] = useState(null);
+            const [expense, setExpense] = useState(null);
             
-            useEffect(() => {
-                setIsExpanded(false);
-                const checkData = async () => {
-                    const savedPhoto = await dbOps.getPhoto(`${day}_${loc.name}`);
-                    setPhoto(savedPhoto || null); // 修復照片殘留
-                    const savedNote = await dbOps.getNote(`${day}_${loc.name}`);
-                    setNote(savedNote || '');
-                };
-                checkData();
-            }, [loc.name, day]);
+            const spotId = loc.id || `${day}_${loc.name}`;
+            const isHotel = loc.type === 'hotel'; // 判斷是否為飯店
 
-            // 修正白屏關鍵：定義 handleSaveNote
-            const handleSaveNote = async () => {
-                await dbOps.saveNote(`${day}_${loc.name}`, note);
-                setShowNoteInput(false);
+            useEffect(() => {
+                const load = async () => {
+                    const [p, n, c] = await Promise.all([
+                        dbOps.get(STORE_PHOTOS, spotId),
+                        dbOps.get(STORE_NOTES, spotId),
+                        dbOps.getCheckIn(spotId)
+                    ]);
+                    setPhoto(p?.image);
+                    setNote(n?.text || '');
+                    setCheckIn(c);
+                    const allExp = JSON.parse(localStorage.getItem('trip_expenses') || '[]');
+                    const exp = allExp.find(e => e.location === loc.name);
+                    setExpense(exp);
+                };
+                load();
+            }, [spotId, loc.name]);
+
+            const handleCheckInToggle = async (e) => {
+                const checked = e.target.checked;
+                if (checked) {
+                    const now = Date.now();
+                    const lat = userLocation?.lat || loc.lat;
+                    const lng = userLocation?.lng || loc.lng;
+                    await dbOps.saveCheckIn(spotId, lat, lng, now);
+                    setCheckIn({ timestamp: now, lat, lng });
+                } else {
+                    if(confirm('確定要取消打卡紀錄嗎？')) {
+                        await dbOps.deleteCheckIn(spotId);
+                        setCheckIn(null);
+                    }
+                }
             };
 
-            const handleCapture = (e) => {
+            const tryImplicitCheckIn = async () => {
+                if (!checkIn) {
+                    const now = Date.now();
+                    const lat = userLocation?.lat || loc.lat;
+                    const lng = userLocation?.lng || loc.lng;
+                    await dbOps.saveCheckIn(spotId, lat, lng, now);
+                    setCheckIn({ timestamp: now, lat, lng });
+                }
+            };
+
+            const handlePhoto = async (e) => {
                 if (e.target.files?.[0]) {
                     const reader = new FileReader();
-                    reader.onload = async (e) => {
-                        const base64 = e.target.result;
-                        setPhoto(base64);
-                        await dbOps.savePhoto(`${day}_${loc.name}`, base64);
+                    reader.onload = async (ev) => {
+                        await dbOps.savePhoto(spotId, ev.target.result);
+                        setPhoto(ev.target.result);
+                        tryImplicitCheckIn();
                     };
                     reader.readAsDataURL(e.target.files[0]);
                 }
             };
 
-            const distance = useMemo(() => {
-                if (!userLocation || !loc.lat || !loc.lng) return null;
-                return calculateDistance(userLocation.lat, userLocation.lng, loc.lat, loc.lng);
-            }, [userLocation, loc]);
+            const handleNoteSave = async () => {
+                await dbOps.saveNote(spotId, note);
+                setShowNoteInput(false);
+                tryImplicitCheckIn();
+            };
+
+            const handleDelete = async () => {
+                if (loc.isCustom) {
+                    if(confirm('確定要永久刪除此自訂景點嗎？')) {
+                        await dbOps.deleteCustomSpot(loc.rawId);
+                        onUpdate();
+                    }
+                } else {
+                    await dbOps.setSpotStatus(spotId, 'cancelled');
+                    onUpdate();
+                }
+            };
+            
+            const handleRestore = async () => {
+                await dbOps.setSpotStatus(spotId, 'active');
+                onUpdate();
+            };
+
+            const isCancelled = loc.status === 'cancelled';
+            const displayTime = checkIn 
+                ? new Date(checkIn.timestamp).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) 
+                : loc.time;
+
+            if (isCancelled) {
+                return (
+                    <div className="bg-gray-100 p-4 rounded-xl border border-dashed border-gray-300 flex justify-between items-center opacity-70">
+                        <span className="text-gray-400 line-through text-sm">{loc.time} {loc.name}</span>
+                        <button onClick={handleRestore} className="text-blue-500 text-xs font-bold border border-blue-200 px-2 py-1 rounded">復原</button>
+                    </div>
+                );
+            }
+
+            // 樣式：飯店使用靛藍色，自訂景點使用橘色，一般景點使用灰色/白色
+            let cardStyle = "border-gray-100";
+            if (isHotel) cardStyle = "border-indigo-200 bg-indigo-50/30";
+            else if (loc.isCustom) cardStyle = "border-orange-200 bg-orange-50/20";
 
             return (
-                <div className={`bg-white p-4 rounded-2xl card-shadow border relative overflow-hidden transition-all duration-300 ${loc.isCustom ? 'border-orange-200 bg-orange-50/30' : 'border-gray-100'}`}>
-                    <div className="flex justify-between items-start mb-2">
-                        <div className="flex items-center gap-2">
-                            <div className={`p-1.5 rounded-lg ${loc.type === 'food' ? 'bg-orange-100 text-orange-500' : 'bg-gray-100 text-gray-500'}`}>
-                                <Icon name={loc.type === 'food' ? 'utensils' : loc.type === 'shop' ? 'shopping-bag' : loc.type === 'transport' ? 'car' : 'map-pin'} size={16} />
+                <div className={`bg-white p-4 rounded-2xl shadow-sm border relative transition-all duration-300 ${cardStyle}`}>
+                    <div className="flex justify-between items-start mb-3">
+                        <div className="flex items-center gap-3">
+                            {/* Icon 邏輯 */}
+                            <div className={`p-2 rounded-xl ${checkIn ? 'bg-green-100 text-green-600' : isHotel ? 'bg-indigo-100 text-indigo-500' : 'bg-gray-100 text-gray-500'}`}>
+                                <Icon name={isHotel ? 'bed' : loc.type === 'food' ? 'utensils' : loc.type === 'shop' ? 'shopping-bag' : 'map-pin'} size={18} />
                             </div>
-                            <span className="font-mono text-lg font-bold text-gray-800">{loc.time}</span>
+                            <div>
+                                <div className={`font-mono text-xl font-bold ${checkIn ? 'text-green-600' : isHotel ? 'text-indigo-900' : 'text-gray-800'}`}>
+                                    {displayTime}
+                                </div>
+                                <div className="text-[10px] text-gray-400 font-bold tracking-wider">{checkIn ? 'ACTUAL' : 'PLANNED'}</div>
+                            </div>
                         </div>
-                        <div className="flex gap-2">
-                             <button onClick={() => setShowNoteInput(!showNoteInput)} className={`p-1.5 rounded-full border shadow-sm active:scale-90 flex items-center justify-center w-8 h-8 ${note ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-gray-50 text-gray-400 border-gray-200'}`}>
-                                <Icon name="pencil" size={14} />
-                            </button>
-                            <button onClick={() => onExpense(loc.name)} className="bg-yellow-50 text-yellow-600 p-1.5 rounded-full border border-yellow-200 shadow-sm active:scale-90 flex items-center justify-center w-8 h-8">
-                                <Icon name="wallet" size={16} />
-                            </button>
-                            <label className={`p-1.5 rounded-full cursor-pointer hover:bg-gray-100 active:scale-90 transition-transform flex items-center justify-center w-8 h-8 ${photo ? 'bg-[#e85a4f] text-white shadow-md' : 'bg-gray-50 text-gray-500'}`}>
-                                <input type="file" accept="image/*" className="hidden" onChange={handleCapture} />
-                                <Icon name="camera" size={16} />
-                            </label>
-                            {loc.link && <a href={loc.link} target="_blank" className="bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1"><Icon name="navigation" size={12} /> 導航</a>}
-                        </div>
+                        <ToggleCheckIn isChecked={!!checkIn} onChange={handleCheckInToggle} />
                     </div>
-                    
-                    <h3 className="text-xl font-bold text-gray-800 mb-1">{loc.name} {loc.isCustom && <span className="text-[10px] text-orange-500 bg-orange-100 px-1 rounded ml-1">手動</span>}</h3>
-                    
-                    {distance && <p className="text-xs text-blue-500 font-bold mb-1 flex items-center gap-1"><Icon name="navigation-2" size={10} /> 距 {distance}</p>}
-                    <p className="text-gray-500 text-sm mb-3">{loc.desc}</p>
 
-                     {/* 筆記輸入區域 */}
+                    <div className="mb-2">
+                         <h3 className={`text-lg font-bold ${isHotel ? 'text-indigo-900' : 'text-gray-800'}`}>{loc.name}</h3>
+                         <p className="text-gray-500 text-sm">{loc.desc}</p>
+                    </div>
+
+                    <div className="flex gap-2 mb-4">
+                        <button onClick={() => setShowNoteInput(!showNoteInput)} className={`flex-1 py-2 rounded-lg border flex items-center justify-center gap-1 text-sm font-bold transition-colors ${note ? 'bg-blue-50 text-blue-600 border-blue-100' : 'bg-gray-50 text-gray-500 border-gray-100'}`}>
+                            <Icon name="pencil" size={14} /> 筆記
+                        </button>
+                        <button onClick={() => onExpense(loc.name)} className={`flex-1 py-2 rounded-lg border flex items-center justify-center gap-1 text-sm font-bold transition-colors ${expense ? 'bg-green-50 text-green-600 border-green-200' : 'bg-gray-50 text-gray-500 border-gray-100'}`}>
+                            <Icon name="wallet" size={14} /> {expense ? `¥${expense.amount}` : '記帳'}
+                        </button>
+                        <label className={`flex-1 py-2 rounded-lg border flex items-center justify-center gap-1 text-sm font-bold transition-colors cursor-pointer ${photo ? 'bg-red-50 text-red-500 border-red-100' : 'bg-gray-50 text-gray-500 border-gray-100'}`}>
+                            <input type="file" accept="image/*" className="hidden" onChange={handlePhoto} />
+                            <Icon name="camera" size={14} /> {photo ? '已拍' : '拍照'}
+                        </label>
+                    </div>
+
                     {showNoteInput && (
                         <div className="mb-3 animate-fade-in">
-                            <textarea 
-                                value={note}
-                                onChange={(e) => setNote(e.target.value)}
-                                placeholder="寫點什麼..."
-                                className="w-full p-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-100 outline-none mb-2"
-                                rows="3"
-                            />
-                            <div className="flex justify-end gap-2">
-                                {/* 修正：取消時，重新讀取資料庫的舊筆記來還原狀態 */}
-                                <button 
-                                    onClick={async () => {
-                                        setShowNoteInput(false);
-                                        const savedNote = await dbOps.getNote(`${day}_${loc.name}`);
-                                        setNote(savedNote || '');
-                                    }} 
-                                    className="text-xs text-gray-400 px-3 py-1"
-                                >
-                                    取消
-                                </button>
-                                <button onClick={handleSaveNote} className="text-xs bg-blue-500 text-white px-3 py-1 rounded-md shadow-sm">儲存</button>
+                            <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="記錄當下心情..." className="w-full p-3 bg-gray-50 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-100" rows="3"></textarea>
+                            <div className="flex justify-end gap-2 mt-2">
+                                <button onClick={() => setShowNoteInput(false)} className="text-gray-400 text-xs px-2">取消</button>
+                                <button onClick={handleNoteSave} className="bg-blue-500 text-white px-3 py-1 rounded-lg text-xs font-bold">儲存</button>
                             </div>
                         </div>
                     )}
 
-                    {/* 已儲存的筆記顯示 */}
-                    {!showNoteInput && note && (
-                        <div 
-                            className="mb-3 p-3 bg-yellow-50/50 border border-yellow-100 rounded-lg text-sm text-gray-600 cursor-pointer hover:bg-yellow-50 transition-colors"
-                            onClick={() => setShowNoteInput(true)} 
-                        >
-                            <div className="flex items-start gap-2">
-                                <Icon name="sticky-note" size={14} className="text-yellow-400 mt-0.5 shrink-0" />
-                                <span className="whitespace-pre-wrap">{note}</span>
-                            </div>
+                    {note && !showNoteInput && (
+                        <div onClick={() => setShowNoteInput(true)} className="mb-3 p-3 bg-yellow-50 border border-yellow-100 rounded-xl text-sm text-gray-700 italic flex gap-2">
+                            <Icon name="quote" size={12} className="text-yellow-400 shrink-0 mt-1" />
+                            {note}
                         </div>
                     )}
-                    
+
                     {photo && (
-                        <div className="mb-3 relative rounded-lg overflow-hidden border border-gray-200 animate-fade-in group">
-                            <img src={photo} className="w-full h-32 object-cover" />
-                            <div className="absolute bottom-0 right-0 bg-[#e85a4f] text-white text-[10px] px-2 py-1 rounded-tl-lg font-bold">已紀錄</div>
-                            
-                            {/* 刪除按鈕 */}
-                            <button 
-                                onClick={async (e) => {
-                                    e.stopPropagation();
-                                    if(confirm('確定要刪除這張照片嗎？')) {
-                                        await dbOps.deletePhoto(`${day}_${loc.name}`);
-                                        setPhoto(null);
-                                    }
-                                }}
-                                className="absolute top-2 right-2 bg-black/50 text-white p-1.5 rounded-full hover:bg-red-500 transition-colors"
-                            >
-                                <Icon name="trash-2" size={14} />
-                            </button>
+                        <div className="mb-3 relative rounded-xl overflow-hidden shadow-sm group">
+                            <img src={photo} className="w-full h-40 object-cover" />
+                            <div className="absolute top-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded-full backdrop-blur-sm">已存檔</div>
                         </div>
                     )}
 
-                    <div className="flex justify-between items-end">
-                        <div className="flex flex-wrap gap-1">{loc.tags && loc.tags.map(tag => <Tag key={tag} text={tag} />)}</div>
-                        {loc.details && <button onClick={() => setIsExpanded(!isExpanded)} className="text-gray-400 hover:text-[#e85a4f] flex items-center gap-1 text-xs font-medium p-1 transition-colors">{isExpanded ? '收起' : '介紹'} <Icon name={isExpanded ? "chevron-up" : "chevron-down"} size={14} /></button>}
+                    <div className="flex justify-between items-center pt-2 border-t border-gray-50">
+                        <div className="flex gap-2">
+                            {loc.link && <a href={loc.link} target="_blank" className="text-blue-500 text-xs font-bold flex items-center gap-1"><Icon name="navigation" size={12}/> 導航</a>}
+                            {loc.details && <button onClick={() => setIsExpanded(!isExpanded)} className="text-gray-400 text-xs flex items-center gap-1">詳情 <Icon name={isExpanded?"chevron-up":"chevron-down"} size={12}/></button>}
+                        </div>
+                        <button onClick={handleDelete} className="text-gray-300 hover:text-red-400 p-1">
+                            <Icon name="trash-2" size={14} />
+                        </button>
                     </div>
-                    {isExpanded && loc.details && <div className="mt-4 pt-4 border-t border-gray-100 animate-fade-in text-sm text-gray-600 leading-relaxed text-justify">{loc.details}</div>}
+
+                    {isExpanded && <div className="mt-3 text-sm text-gray-600 leading-relaxed animate-fade-in">{loc.details}</div>}
                 </div>
             );
         };
 
-        const TabItinerary = ({ tripData, activeDay, setActiveDay, userLocation, onExpense }) => {
-            const [mergedLocations, setMergedLocations] = useState([]);
+        // --- 6. Tab: 行程頁 ---
+        const TabItinerary = ({ activeDay, setActiveDay, userLocation, onExpense }) => {
+            const [mergedList, setMergedList] = useState([]);
             const [isSpotModalOpen, setIsSpotModalOpen] = useState(false);
-
-            const loadAndMerge = async () => {
-                const staticLocs = tripData.find(t => t.day === activeDay)?.locations || [];
-                const customSpots = await dbOps.getCustomSpots();
-                const dayCustomSpots = customSpots.filter(s => s.dayIndex === activeDay);
-                const all = [...staticLocs, ...dayCustomSpots].sort((a, b) => a.time.localeCompare(b.time));
-                setMergedLocations(all);
-            };
-
-            useEffect(() => { loadAndMerge(); }, [activeDay]);
-
             const currentTrip = tripData.find(t => t.day === activeDay);
+
+            const loadData = useCallback(async () => {
+                const [customSpots, spotStatus, checkins] = await Promise.all([
+                    dbOps.getAll(STORE_CUSTOM_SPOTS),
+                    dbOps.getAll(STORE_SPOT_STATUS),
+                    dbOps.getAll(STORE_CHECKINS)
+                ]);
+                
+                const staticList = currentTrip.locations.map(loc => {
+                    const id = `${activeDay}_${loc.name}`;
+                    const statusObj = spotStatus.find(s => s.id === id);
+                    return { ...loc, id, isCustom: false, status: statusObj?.status || 'active' };
+                });
+
+                const dayCustom = customSpots.filter(s => s.dayIndex === activeDay).map(s => ({
+                    ...s, id: `${activeDay}_${s.name}`, rawId: s.id, isCustom: true, status: 'active'
+                }));
+
+                const all = [...staticList, ...dayCustom].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+                setMergedList(all);
+            }, [activeDay, currentTrip]);
+
+            useEffect(() => { loadData(); }, [loadData]);
 
             return (
                 <div className="pb-24">
                     <div className="relative h-64 w-full">
                         <img src={currentTrip.image} className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent"></div>
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
                         <div className="absolute bottom-4 left-5 right-5 text-white">
-                            <div className="flex items-center gap-2 mb-1 opacity-90">
-                                <span className="bg-white/20 backdrop-blur-sm px-2 py-0.5 rounded text-xs font-bold">{currentTrip.date}</span>
-                                <span className="flex items-center text-xs"><Icon name="cloud-sun" size={14} className="mr-1"/> {currentTrip.weather}</span>
+                            <div className="flex items-center gap-2 mb-1 opacity-90 text-sm font-bold">
+                                <span className="bg-white/20 backdrop-blur-md px-2 py-0.5 rounded text-xs">{currentTrip.date}</span>
+                                <span>{currentTrip.weather}</span>
                             </div>
-                            <h2 className="text-3xl font-bold">{currentTrip.title}</h2>
+                            <h2 className="text-3xl font-bold shadow-sm">{currentTrip.title}</h2>
                         </div>
                     </div>
 
-                    <div className="sticky top-0 z-30 bg-[#f8f5f2]/95 backdrop-blur-sm pt-4 pb-2 px-2 shadow-sm">
-                        <div className="flex overflow-x-auto gap-3 scrollbar-hide px-2 pb-2">
-                            {tripData.map((day) => (
-                                <button key={day.day} onClick={() => setActiveDay(day.day)} className={`flex-shrink-0 flex flex-col items-center justify-center w-12 h-14 rounded-xl transition-all ${activeDay === day.day ? "bg-[#e85a4f] text-white shadow-lg scale-105" : "bg-white text-gray-400 border border-gray-100"}`}>
-                                    <span className="text-[10px]">D{day.day}</span>
-                                    <span className="text-lg font-bold">{day.date.split('/')[1].split(' ')[0]}</span>
+                    <div className="sticky top-0 z-30 bg-[#f8f5f2]/95 backdrop-blur-sm shadow-sm pt-2 pb-2">
+                        <div className="flex overflow-x-auto gap-2 px-4 pb-2 scrollbar-hide">
+                            {tripData.map(d => (
+                                <button key={d.day} onClick={() => setActiveDay(d.day)} data-day={d.day}
+                                    className={`flex-shrink-0 w-12 h-14 rounded-xl flex flex-col items-center justify-center transition-all ${activeDay === d.day ? 'bg-[#e85a4f] text-white shadow-lg scale-105' : 'bg-white text-gray-400 border'}`}>
+                                    <span className="text-[10px] font-bold">D{d.day}</span>
+                                    <span className="text-lg font-bold">{d.date.split(' ')[0].split('/')[1]}</span>
                                 </button>
                             ))}
                         </div>
                     </div>
 
-                    <div className="px-5 mt-4 space-y-6">
-                        {mergedLocations.map((loc, idx) => (
-                            <LocationCard key={idx} loc={loc} userLocation={userLocation} day={currentTrip.day} onExpense={onExpense} />
+                    <div className="px-4 mt-6 space-y-6">
+                        {mergedList.map((loc) => (
+                            <LocationCard key={loc.id} loc={loc} day={activeDay} userLocation={userLocation} onExpense={onExpense} onUpdate={loadData} />
                         ))}
-                        {currentTrip.hotel && <div className="bg-[#2d3436] text-white p-5 rounded-2xl shadow-lg mt-8 mb-4"><h3 className="text-xl font-bold">{currentTrip.hotel.name}</h3></div>}
                     </div>
 
-                    <button 
-                        onClick={() => setIsSpotModalOpen(true)}
-                        className="fixed bottom-24 right-5 bg-[#e85a4f] text-white p-4 rounded-full shadow-2xl active:scale-90 transition-transform z-40 border-4 border-[#f8f5f2]"
-                    >
+                    <button onClick={() => setIsSpotModalOpen(true)} className="fixed bottom-24 right-5 bg-[#e85a4f] text-white w-14 h-14 rounded-full shadow-2xl flex items-center justify-center z-40 active:scale-90 transition-transform">
                         <Icon name="plus" size={28} />
                     </button>
 
-                    <AddSpotModal 
-                        isOpen={isSpotModalOpen} 
-                        onClose={() => setIsSpotModalOpen(false)} 
-                        dayIndex={activeDay}
-                        dayDate={currentTrip.fullDate}
-                        userLocation={userLocation}
-                        onAdded={loadAndMerge} 
-                    />
+                    <AddSpotModal isOpen={isSpotModalOpen} onClose={() => setIsSpotModalOpen(false)} dayIndex={activeDay} onAdded={loadData} />
                 </div>
             );
         };
 
-        const TabBudget = () => {
-            const [expenses, setExpenses] = useState([]);
-            useEffect(() => {
-                setExpenses(JSON.parse(localStorage.getItem('trip_expenses') || '[]'));
-            }, []);
-
-            const total = expenses.reduce((acc, curr) => acc + curr.amount, 0);
-
+        // --- 7. Modals ---
+        const AddSpotModal = ({ isOpen, onClose, dayIndex, onAdded }) => {
+            const [name, setName] = useState('');
+            const [time, setTime] = useState('12:00');
+            
+            const handleSave = async () => {
+                if(!name) return;
+                await dbOps.addCustomSpot({ name, time, type: 'custom', desc: '手動新增', dayIndex, isCustom: true });
+                onAdded(); onClose(); setName('');
+            };
+            if(!isOpen) return null;
             return (
-                <div className="px-5 pt-12 pb-24">
-                    <h2 className="text-3xl font-bold text-gray-800 mb-2">消費統計</h2>
-                    <div className="bg-gradient-to-br from-green-500 to-green-700 text-white p-6 rounded-3xl shadow-lg mb-8 text-center">
-                        <span className="text-white/80 text-sm font-medium">記帳總額</span>
-                        <div className="text-4xl font-bold font-mono mt-1">¥{total.toLocaleString()}</div>
-                    </div>
-                    <div className="space-y-3">
-                        {expenses.length === 0 && <div className="text-center text-gray-400 py-10">尚無紀錄，請至行程頁面記帳</div>}
-                        {expenses.map(item => (
-                            <div key={item.id} className="bg-white p-3 rounded-xl flex justify-between items-center shadow-sm">
-                                <div>
-                                    <span className="font-bold text-gray-800 block">{item.name}</span>
-                                    <span className="text-xs text-gray-400">{item.date}</span>
-                                </div>
-                                <span className="font-mono font-bold text-gray-800">¥{item.amount.toLocaleString()}</span>
-                            </div>
-                        ))}
+                <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+                    <div className="bg-white w-full p-6 rounded-t-3xl modal-enter" onClick={e=>e.stopPropagation()}>
+                        <h3 className="text-xl font-bold mb-4">新增 D{dayIndex} 景點</h3>
+                        <input type="time" value={time} onChange={e=>setTime(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-3 font-mono"/>
+                        <input type="text" placeholder="景點名稱" value={name} onChange={e=>setName(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-6" autoFocus/>
+                        <button onClick={handleSave} className="w-full bg-[#e85a4f] text-white py-3 rounded-xl font-bold">新增</button>
                     </div>
                 </div>
             );
         };
 
-        const TabInfo = () => <div className="p-5 pt-12"><h2 className="text-2xl font-bold mb-4">功能選單</h2><button onClick={exportData} className="w-full bg-blue-500 text-white p-4 rounded-xl font-bold shadow-md">匯出完整遊記備份</button></div>;
+        const ExpenseModal = ({ isOpen, onClose, defaultName }) => {
+            const [amount, setAmount] = useState('');
+            const [name, setName] = useState('');
+            const [history, setHistory] = useState([]);
 
+            useEffect(() => { 
+                if(isOpen) {
+                    setName(defaultName || '');
+                    const all = JSON.parse(localStorage.getItem('trip_expenses') || '[]');
+                    if(defaultName) setHistory(all.filter(e => e.location === defaultName));
+                }
+            }, [isOpen, defaultName]);
+
+            const handleSave = () => {
+                if(!amount || !name) return;
+                const newItem = { id: Date.now(), name, amount: parseInt(amount), date: new Date().toLocaleDateString(), location: defaultName || name };
+                const all = JSON.parse(localStorage.getItem('trip_expenses') || '[]');
+                localStorage.setItem('trip_expenses', JSON.stringify([newItem, ...all]));
+                onClose(); setAmount('');
+            };
+
+            if(!isOpen) return null;
+            return (
+                <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+                    <div className="bg-white w-full p-6 rounded-t-3xl modal-enter max-h-[80vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xl font-bold flex items-center gap-2"><Icon name="wallet"/> 記帳</h3>
+                            <button onClick={onClose}><Icon name="x"/></button>
+                        </div>
+                        
+                        {history.length > 0 && (
+                            <div className="mb-4 bg-yellow-50 p-3 rounded-xl">
+                                <div className="text-xs text-yellow-600 font-bold mb-2">此景點已記錄：</div>
+                                {history.map(h => (
+                                    <div key={h.id} className="flex justify-between text-sm border-b border-yellow-100 last:border-0 py-1">
+                                        <span>{h.name}</span>
+                                        <span className="font-mono">¥{h.amount}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+
+                        <input type="text" placeholder="項目 (如: 門票)" value={name} onChange={e=>setName(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-3 font-bold"/>
+                        <input type="number" placeholder="¥ 金額" value={amount} onChange={e=>setAmount(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-6 font-mono text-xl" autoFocus/>
+                        <button onClick={handleSave} className="w-full bg-green-500 text-white py-3 rounded-xl font-bold">儲存紀錄</button>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- 8. App Root ---
         const App = () => {
             const [activeTab, setActiveTab] = useState('itinerary');
             const [activeDay, setActiveDay] = useState(1);
             const [userLocation, setUserLocation] = useState(null);
-            const [expenseModalInfo, setExpenseModalInfo] = useState({ isOpen: false, defaultName: '', defaultDate: '' });
+            const [expenseModal, setExpenseModal] = useState({ isOpen: false, name: '' });
 
+            // [Auto-Focus] 自動跳轉到今天 (年份相容修正)
             useEffect(() => {
-                // 不再需要在這裡呼叫 createIcons，因為 Icon 組件會自己處理
-                if (navigator.geolocation) {
-                    navigator.geolocation.watchPosition(p => setUserLocation({ lat: p.coords.latitude, lng: p.coords.longitude }));
+                const now = new Date();
+                const currentMD = `${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+                const dayMatch = tripData.find(d => d.fullDate.endsWith(currentMD));
+                
+                if (dayMatch) {
+                    setActiveDay(dayMatch.day);
+                    setTimeout(() => {
+                        const btn = document.querySelector(`button[data-day="${dayMatch.day}"]`);
+                        if(btn) btn.scrollIntoView({ behavior: 'smooth', inline: 'center' });
+                    }, 100);
                 }
-            }, [activeTab, activeDay]);
+            }, []);
 
-            const currentTripDate = tripData.find(t => t.day === activeDay)?.fullDate;
+            // [GPS Logic] 背景(前台)軌跡記錄
+            useEffect(() => {
+                if (navigator.geolocation) {
+                    const watcher = navigator.geolocation.watchPosition(
+                        (p) => {
+                            const { latitude, longitude } = p.coords;
+                            setUserLocation({ lat: latitude, lng: longitude });
+                            dbOps.saveGPS(latitude, longitude).catch(e => console.error("GPS Save Fail", e));
+                        },
+                        (err) => console.error("GPS Error", err),
+                        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+                    );
+                    return () => navigator.geolocation.clearWatch(watcher);
+                }
+            }, []);
 
             return (
-                <div className="max-w-md mx-auto min-h-screen bg-[#f8f5f2] relative shadow-2xl">
-                    <div className="fixed top-0 left-0 right-0 z-[60] pointer-events-none flex justify-end p-4"></div>
-
+                <div className="max-w-md mx-auto min-h-screen bg-[#f8f5f2] relative shadow-2xl overflow-hidden">
                     {activeTab === 'itinerary' && (
                         <TabItinerary 
-                            tripData={tripData} 
                             activeDay={activeDay} 
                             setActiveDay={setActiveDay} 
-                            userLocation={userLocation}
-                            onExpense={(name) => setExpenseModalInfo({ isOpen: true, defaultName: name, defaultDate: currentTripDate })}
+                            userLocation={userLocation} 
+                            onExpense={(name) => setExpenseModal({ isOpen: true, name })}
                         />
                     )}
-                    {activeTab === 'info' && <TabInfo />}
-                    {activeTab === 'budget' && <TabBudget />}
+                    
+                    {activeTab === 'budget' && (
+                        <div className="p-5 pt-12">
+                            <h2 className="text-3xl font-bold mb-4">消費統計</h2>
+                            <div className="bg-green-500 text-white p-6 rounded-3xl shadow-lg mb-6 text-center">
+                                <div className="text-sm opacity-80">總支出</div>
+                                <div className="text-4xl font-mono font-bold">
+                                    ¥{JSON.parse(localStorage.getItem('trip_expenses') || '[]').reduce((a,c)=>a+c.amount,0).toLocaleString()}
+                                </div>
+                            </div>
+                            <div className="space-y-2">
+                                {JSON.parse(localStorage.getItem('trip_expenses') || '[]').map(e => (
+                                    <div key={e.id} className="bg-white p-3 rounded-xl flex justify-between shadow-sm">
+                                        <span>{e.name}</span>
+                                        <span className="font-mono">¥{e.amount}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
-                    <ExpenseModal 
-                        isOpen={expenseModalInfo.isOpen} 
-                        defaultName={expenseModalInfo.defaultName}
-                        defaultDate={expenseModalInfo.defaultDate}
-                        onClose={() => setExpenseModalInfo({ ...expenseModalInfo, isOpen: false })}
-                    />
+                    {activeTab === 'info' && (
+                        <div className="p-5 pt-12">
+                            <h2 className="text-2xl font-bold mb-6">設定與匯出</h2>
+                            <button onClick={exportData} className="w-full bg-blue-600 text-white p-4 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 mb-4">
+                                <Icon name="download"/> 匯出完整回憶 (JSON)
+                            </button>
+                            <p className="text-sm text-gray-400 text-center">包含所有行程、打卡紀錄、照片與軌跡</p>
+                        </div>
+                    )}
 
-                    <div className="fixed bottom-0 left-0 right-0 glass-nav z-50 max-w-md mx-auto">
+                    <div className="fixed bottom-0 left-0 right-0 glass-nav z-50 max-w-md mx-auto pb-safe">
                         <div className="flex justify-around items-center py-3">
-                            <button onClick={() => setActiveTab('itinerary')} className={`flex flex-col items-center gap-1 ${activeTab === 'itinerary' ? 'text-[#e85a4f]' : 'text-gray-400'}`}><Icon name="map" size={24} /><span className="text-[10px]">行程</span></button>
-                            <button onClick={() => setActiveTab('info')} className={`flex flex-col items-center gap-1 ${activeTab === 'info' ? 'text-[#e85a4f]' : 'text-gray-400'}`}><Icon name="file-text" size={24} /><span className="text-[10px]">資訊</span></button>
-                            <button onClick={() => setActiveTab('budget')} className={`flex flex-col items-center gap-1 ${activeTab === 'budget' ? 'text-[#e85a4f]' : 'text-gray-400'}`}><Icon name="wallet" size={24} /><span className="text-[10px]">統計</span></button>
+                            <button onClick={()=>setActiveTab('itinerary')} className={`flex flex-col items-center gap-1 ${activeTab==='itinerary'?'text-[#e85a4f]':'text-gray-400'}`}>
+                                <Icon name="map" size={24}/> <span className="text-[10px]">行程</span>
+                            </button>
+                            <button onClick={()=>setActiveTab('budget')} className={`flex flex-col items-center gap-1 ${activeTab==='budget'?'text-[#e85a4f]':'text-gray-400'}`}>
+                                <Icon name="wallet" size={24}/> <span className="text-[10px]">記帳</span>
+                            </button>
+                            <button onClick={()=>setActiveTab('info')} className={`flex flex-col items-center gap-1 ${activeTab==='info'?'text-[#e85a4f]':'text-gray-400'}`}>
+                                <Icon name="settings" size={24}/> <span className="text-[10px]">設定</span>
+                            </button>
                         </div>
                     </div>
+
+                    <ExpenseModal isOpen={expenseModal.isOpen} defaultName={expenseModal.name} onClose={()=>setExpenseModal({isOpen:false, name:''})} />
                 </div>
             );
         };
@@ -729,5 +816,3 @@
     </script>
 </body>
 </html>
-
-
