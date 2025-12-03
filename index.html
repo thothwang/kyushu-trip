@@ -371,9 +371,20 @@
             // C. 排序
             timeline.sort((a, b) => {
                 if (a.dayIndex !== b.dayIndex) return a.dayIndex - b.dayIndex;
-                const timeA = a.checkIn ? new Date(a.checkIn.timestamp).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) : a.time;
-                const timeB = b.checkIn ? new Date(b.checkIn.timestamp).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) : b.time;
-                return (timeA || '23:59').localeCompare(timeB || '23:59');
+
+                const getMinutes = (item) => {
+                    if (item.checkIn && item.checkIn.timestamp) {
+                        const d = new Date(item.checkIn.timestamp);
+                        return d.getHours() * 60 + d.getMinutes();
+                    }
+                    if (item.time) {
+                        const [h, m] = item.time.split(':').map(Number);
+                        return (h || 0) * 60 + (m || 0);
+                    }
+                    return 24 * 60 + 999;
+                };
+
+                return getMinutes(a) - getMinutes(b);
             });
 
             const data = { 
@@ -576,28 +587,74 @@
             const [isSpotModalOpen, setIsSpotModalOpen] = useState(false);
             const currentTrip = tripData.find(t => t.day === activeDay);
 
-            const loadData = useCallback(async () => {
-                const [customSpots, spotStatus, checkins] = await Promise.all([
-                    dbOps.getAll(STORE_CUSTOM_SPOTS),
-                    dbOps.getAll(STORE_SPOT_STATUS),
-                    dbOps.getAll(STORE_CHECKINS)
-                ]);
-                
-                const staticList = currentTrip.locations.map(loc => {
-                    const id = `${activeDay}_${loc.name}`;
-                    const statusObj = spotStatus.find(s => s.id === id);
-                    return { ...loc, id, isCustom: false, status: statusObj?.status || 'active' };
-                });
+            // [新增] 1. 加入一個 refreshKey 用來手動觸發更新
+            const [refreshKey, setRefreshKey] = useState(0);
+            const refresh = () => setRefreshKey(prev => prev + 1);
 
-                const dayCustom = customSpots.filter(s => s.dayIndex === activeDay).map(s => ({
-                    ...s, id: `${activeDay}_${s.name}`, rawId: s.id, isCustom: true, status: 'active'
-                }));
+            // [修改] 2. 修正後的 useEffect
+            useEffect(() => {
+                let isMounted = true; 
 
-                const all = [...staticList, ...dayCustom].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-                setMergedList(all);
-            }, [activeDay, currentTrip]);
+                const loadData = async () => {
+                    const [customSpots, spotStatus, checkins] = await Promise.all([
+                        dbOps.getAll(STORE_CUSTOM_SPOTS),
+                        dbOps.getAll(STORE_SPOT_STATUS),
+                        dbOps.getAll(STORE_CHECKINS)
+                    ]);
+                    
+                    if (!isMounted) return; 
 
-            useEffect(() => { loadData(); }, [loadData]);
+                    // 1. 建立 Check-in 查找表 (修正排序失效的關鍵!)
+                    const checkinMap = Object.fromEntries(checkins.map(c => [c.id, c]));
+
+                    // 2. 處理原始行程 (加入 checkIn 資料)
+                    const staticList = currentTrip.locations.map(loc => {
+                        const id = `${activeDay}_${loc.name}`;
+                        const statusObj = spotStatus.find(s => s.id === id);
+                        return { 
+                            ...loc, 
+                            id, 
+                            isCustom: false, 
+                            status: statusObj?.status || 'active',
+                            checkIn: checkinMap[id] || null // 這裡要傳入，排序才讀得到
+                        };
+                    });
+
+                    // 3. 處理自訂行程 (加入 checkIn 資料)
+                    const dayCustom = customSpots.filter(s => s.dayIndex === activeDay).map(s => {
+                        const id = `${activeDay}_${s.name}`;
+                        return {
+                            ...s, 
+                            id, 
+                            rawId: s.id, 
+                            isCustom: true, 
+                            status: 'active',
+                            checkIn: checkinMap[id] || null // 這裡也要
+                        };
+                    });
+
+                    // 4. 合併並排序
+                    const all = [...staticList, ...dayCustom].sort((a, b) => {
+                        const getMinutes = (item) => {
+                            if (item.checkIn && item.checkIn.timestamp) {
+                                const d = new Date(item.checkIn.timestamp);
+                                return d.getHours() * 60 + d.getMinutes();
+                            }
+                            if (item.time) {
+                                const [h, m] = item.time.split(':').map(Number);
+                                return (h || 0) * 60 + (m || 0);
+                            }
+                            return 24 * 60 + 999;
+                        };
+                        return getMinutes(a) - getMinutes(b);
+                    });
+                    
+                    if (isMounted) setMergedList(all);
+                };
+
+                loadData();
+                return () => { isMounted = false; }; 
+            }, [activeDay, currentTrip, refreshKey]);
 
             return (
                 <div className="pb-24">
@@ -627,7 +684,7 @@
 
                     <div className="px-4 mt-6 space-y-6">
                         {mergedList.map((loc) => (
-                            <LocationCard key={loc.id} loc={loc} day={activeDay} userLocation={userLocation} onExpense={onExpense} onUpdate={loadData} />
+                            <LocationCard key={loc.id} loc={loc} day={activeDay} userLocation={userLocation} onExpense={onExpense} onUpdate={refresh} />
                         ))}
                     </div>
 
@@ -635,7 +692,7 @@
                         <Icon name="plus" size={28} />
                     </button>
 
-                    <AddSpotModal isOpen={isSpotModalOpen} onClose={() => setIsSpotModalOpen(false)} dayIndex={activeDay} onAdded={loadData} />
+                    <AddSpotModal isOpen={isSpotModalOpen} onClose={() => setIsSpotModalOpen(false)} dayIndex={activeDay} onAdded={refresh} />
                 </div>
             );
         };
@@ -817,3 +874,4 @@
 </body>
 
 </html>
+
