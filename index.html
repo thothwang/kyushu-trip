@@ -720,37 +720,79 @@
             );
         };
 
-        const ExpenseModal = ({ isOpen, onClose, defaultName }) => {
+        // [升級版] 記帳 Modal：支援 新增、修改、刪除
+        const ExpenseModal = ({ isOpen, mode, payload, onClose }) => {
             const [amount, setAmount] = useState('');
             const [name, setName] = useState('');
             const [history, setHistory] = useState([]);
 
+            // 初始化：根據模式填入資料
             useEffect(() => { 
-                if(isOpen) {
-                    setName(defaultName || '');
-                    const all = JSON.parse(localStorage.getItem('trip_expenses') || '[]');
-                    if(defaultName) setHistory(all.filter(e => e.location === defaultName));
+                if(isOpen && payload) {
+                    if (mode === 'edit') {
+                        // 編輯模式：填入原本的資料
+                        setName(payload.name);
+                        setAmount(payload.amount);
+                    } else {
+                        // 新增模式：填入預設景點名稱
+                        setName(payload.defaultName || '');
+                        setAmount('');
+                        // 載入該景點的歷史花費 (方便參考)
+                        const all = JSON.parse(localStorage.getItem('trip_expenses') || '[]');
+                        if(payload.defaultName) setHistory(all.filter(e => e.location === payload.defaultName));
+                    }
                 }
-            }, [isOpen, defaultName]);
+            }, [isOpen, mode, payload]);
 
             const handleSave = () => {
                 if(!amount || !name) return;
-                const newItem = { id: Date.now(), name, amount: parseInt(amount), date: new Date().toLocaleDateString(), location: defaultName || name };
                 const all = JSON.parse(localStorage.getItem('trip_expenses') || '[]');
-                localStorage.setItem('trip_expenses', JSON.stringify([newItem, ...all]));
-                onClose(); setAmount('');
+                
+                if (mode === 'edit') {
+                    // 修改舊資料
+                    const newStats = all.map(item => 
+                        item.id === payload.id ? { ...item, name, amount: parseInt(amount) } : item
+                    );
+                    localStorage.setItem('trip_expenses', JSON.stringify(newStats));
+                } else {
+                    // 新增資料
+                    const newItem = { 
+                        id: Date.now(), 
+                        name, 
+                        amount: parseInt(amount), 
+                        date: new Date().toLocaleDateString(), 
+                        location: payload.defaultName || name // 如果是純記帳，location = name
+                    };
+                    localStorage.setItem('trip_expenses', JSON.stringify([newItem, ...all]));
+                }
+                onClose();
+            };
+
+            const handleDelete = () => {
+                if (confirm('確定要刪除這筆消費紀錄嗎？')) {
+                    const all = JSON.parse(localStorage.getItem('trip_expenses') || '[]');
+                    const newStats = all.filter(item => item.id !== payload.id);
+                    localStorage.setItem('trip_expenses', JSON.stringify(newStats));
+                    onClose();
+                }
             };
 
             if(!isOpen) return null;
+
             return (
                 <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
                     <div className="bg-white w-full p-6 pb-10 rounded-t-3xl modal-enter max-h-[80vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-xl font-bold flex items-center gap-2"><Icon name="wallet"/> 記帳</h3>
-                            <button onClick={onClose}><Icon name="x"/></button>
+                        <div className="flex justify-between items-center mb-6">
+                            <h3 className="text-xl font-bold flex items-center gap-2">
+                                <Icon name="wallet"/> {mode === 'edit' ? '編輯消費' : '記一筆'}
+                            </h3>
+                            {mode === 'edit' && (
+                                <button onClick={handleDelete} className="text-red-500 text-sm font-bold px-3 py-1 bg-red-50 rounded-lg">刪除</button>
+                            )}
                         </div>
                         
-                        {history.length > 0 && (
+                        {/* 只有在新增模式且有歷史紀錄時才顯示 */}
+                        {mode === 'create' && history.length > 0 && (
                             <div className="mb-4 bg-yellow-50 p-3 rounded-xl">
                                 <div className="text-xs text-yellow-600 font-bold mb-2">此景點已記錄：</div>
                                 {history.map(h => (
@@ -762,9 +804,20 @@
                             </div>
                         )}
 
-                        <input type="text" placeholder="項目 (如: 門票)" value={name} onChange={e=>setName(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-3 font-bold"/>
-                        <input type="number" placeholder="¥ 金額" value={amount} onChange={e=>setAmount(e.target.value)} className="w-full bg-gray-100 p-3 rounded-xl mb-6 font-mono text-xl" autoFocus/>
-                        <button onClick={handleSave} className="w-full bg-green-500 text-white py-3 rounded-xl font-bold">儲存紀錄</button>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-xs text-gray-400 font-bold ml-1">項目名稱</label>
+                                <input type="text" placeholder="例如: 拉麵、門票" value={name} onChange={e=>setName(e.target.value)} className="w-full bg-gray-100 p-4 rounded-xl font-bold text-lg focus:outline-none focus:ring-2 focus:ring-blue-500"/>
+                            </div>
+                            <div>
+                                <label className="text-xs text-gray-400 font-bold ml-1">金額 (¥)</label>
+                                <input type="number" placeholder="0" value={amount} onChange={e=>setAmount(e.target.value)} className="w-full bg-gray-100 p-4 rounded-xl font-mono text-2xl font-bold focus:outline-none focus:ring-2 focus:ring-green-500" autoFocus inputMode="numeric"/>
+                            </div>
+                        </div>
+
+                        <button onClick={handleSave} className="w-full bg-green-500 text-white py-4 rounded-xl font-bold text-lg mt-6 shadow-lg active:scale-95 transition-transform">
+                            {mode === 'edit' ? '儲存修改' : '確認記帳'}
+                        </button>
                     </div>
                 </div>
             );
@@ -775,7 +828,7 @@
             const [activeTab, setActiveTab] = useState('itinerary');
             const [activeDay, setActiveDay] = useState(1);
             const [userLocation, setUserLocation] = useState(null);
-            const [expenseModal, setExpenseModal] = useState({ isOpen: false, name: '' });
+            const [expenseModal, setExpenseModal] = useState({ isOpen: false, mode: 'create', payload: null });
 
             // [Auto-Focus] 自動跳轉到今天 (年份相容修正)
             useEffect(() => {
@@ -815,24 +868,49 @@
                             activeDay={activeDay} 
                             setActiveDay={setActiveDay} 
                             userLocation={userLocation} 
-                            onExpense={(name) => setExpenseModal({ isOpen: true, name })}
+                            onExpense={(name) => setExpenseModal({ isOpen: true, mode: 'create', payload: { defaultName: name } })}
                         />
                     )}
                     
                     {activeTab === 'budget' && (
-                        <div className="p-5 pt-12">
+                        <div className="p-5 pt-12 pb-24">
                             <h2 className="text-3xl font-bold mb-4">消費統計</h2>
-                            <div className="bg-green-500 text-white p-6 rounded-3xl shadow-lg mb-6 text-center">
-                                <div className="text-sm opacity-80">總支出</div>
-                                <div className="text-4xl font-mono font-bold">
-                                    ¥{JSON.parse(localStorage.getItem('trip_expenses') || '[]').reduce((a,c)=>a+c.amount,0).toLocaleString()}
+                            <div className="bg-green-500 text-white p-6 rounded-3xl shadow-lg mb-6 text-center relative overflow-hidden">
+                                <div className="relative z-10">
+                                    <div className="text-sm opacity-80">總支出 (JPY)</div>
+                                    <div className="text-4xl font-mono font-bold mt-1">
+                                        ¥{JSON.parse(localStorage.getItem('trip_expenses') || '[]').reduce((a,c)=>a+c.amount,0).toLocaleString()}
+                                    </div>
+                                </div>
+                                <div className="absolute -right-4 -bottom-8 opacity-20">
+                                    <Icon name="japanese-yen" size={100} />
                                 </div>
                             </div>
-                            <div className="space-y-2">
+
+                            <div className="flex justify-between items-center mb-2 px-1">
+                                <h3 className="text-sm font-bold text-gray-400">明細列表</h3>
+                                <button onClick={() => setExpenseModal({ isOpen: true, mode: 'create', payload: {} })} className="text-green-600 text-xs font-bold bg-green-50 px-3 py-1.5 rounded-full flex items-center gap-1">
+                                    <Icon name="plus" size={12}/> 新增一筆
+                                </button>
+                            </div>
+
+                            <div className="space-y-3">
+                                {JSON.parse(localStorage.getItem('trip_expenses') || '[]').length === 0 && (
+                                    <div className="text-center text-gray-300 py-10">還沒有記帳紀錄喔</div>
+                                )}
                                 {JSON.parse(localStorage.getItem('trip_expenses') || '[]').map(e => (
-                                    <div key={e.id} className="bg-white p-3 rounded-xl flex justify-between shadow-sm">
-                                        <span>{e.name}</span>
-                                        <span className="font-mono">¥{e.amount}</span>
+                                    // [修改] 加上 onClick 開啟編輯模式
+                                    <div key={e.id} onClick={() => setExpenseModal({ isOpen: true, mode: 'edit', payload: e })} className="bg-white p-4 rounded-xl flex justify-between items-center shadow-sm active:scale-95 transition-transform cursor-pointer border border-transparent hover:border-green-200">
+                                        <div className="flex items-center gap-3">
+                                            <div className="bg-gray-100 p-2 rounded-lg text-gray-400">
+                                                <Icon name="shopping-bag" size={16}/>
+                                            </div>
+                                            <div>
+                                                <div className="font-bold text-gray-800">{e.name}</div>
+                                                <div className="text-xs text-gray-400">{e.date} • {e.location || '一般消費'}</div>
+                                            </div>
+                                        </div>
+                                        <span className="font-mono text-lg font-bold text-gray-700">¥{e.amount.toLocaleString()}</span>
                                     </div>
                                 ))}
                             </div>
@@ -863,7 +941,12 @@
                         </div>
                     </div>
 
-                    <ExpenseModal isOpen={expenseModal.isOpen} defaultName={expenseModal.name} onClose={()=>setExpenseModal({isOpen:false, name:''})} />
+                    <ExpenseModal 
+                        isOpen={expenseModal.isOpen} 
+                        mode={expenseModal.mode}
+                        payload={expenseModal.payload}
+                        onClose={()=>setExpenseModal({...expenseModal, isOpen:false})} 
+                    />
                 </div>
             );
         };
@@ -874,4 +957,5 @@
 </body>
 
 </html>
+
 
