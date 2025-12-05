@@ -579,48 +579,81 @@ const TRIP_FULL_DATA = [
     "date": "",
     "timeline": [
       {
-        "time": "12:30",
+        "time": "09:43",
         "name": "阿蘇大觀峰",
         "location": {
           "lat": 33.0333,
           "lng": 131.0833
         },
-        "note": "",
-        "photo": null,
+        "note": "一開始不知道為什麼叫大觀峰，爬上去後才知道這是可以360都可以看到view 的景觀點，藍天白雲心曠神怡",
+        "photo": "images/6_阿蘇大觀峰.jpg",
         "type": "spot"
       },
       {
-        "time": "13:30",
+        "time": "11:30",
+        "name": "Kusasenri Coffee Roastery 草千里珈琲焙煎所",
+        "location": {
+          "lat": null,
+          "lng": null
+        },
+        "note": "就….又是一個中焙度的咖啡，看這規模應該是知名的品牌，是真的沒有好吃，但在寒風刺骨的阿蘇火山國家公園喝到熱熱的咖啡，我還能計較什麼呢！",
+        "photo": "images/6_Kusasenri_Coffee_Roastery_草千里珈琲焙煎所.jpg",
+        "type": "custom"
+      },
+      {
+        "time": "12:36",
         "name": "草千里",
         "location": {
           "lat": 32.8842,
           "lng": 131.0514
         },
-        "note": "",
-        "photo": null,
+        "note": "走上大草原斜坡可以看到醜醜的火山口，有看到直升機🚁載客來來去去看火山口～其實也是想搭看看，但只有我一個人上去似乎有點無趣，只好期待下次囉～",
+        "photo": "images/6_草千里.jpg",
         "type": "spot"
       },
       {
-        "time": "16:00",
-        "name": "高千穗神社",
+        "time": "13:26",
+        "name": "Asobo no Sato Kugino Roadside Station 道の駅 あそ望の郷くぎの",
         "location": {
-          "lat": 32.71,
-          "lng": 131.3
+          "lat": null,
+          "lng": null
         },
-        "note": "",
-        "photo": null,
-        "type": "spot"
+        "note": "特地來這一個道の駅，有很大片的波波草，也在這裡買了兩種草莓🍓，一個是淡雪，一種是常見的紅草莓，都很好吃！紅的甜 淡雪很香為偏酸，但都是很棒的體驗，另外這家休息站旁邊Montbell 很好買且又可以退稅～大家買的都很開心！讚讚讚",
+        "photo": "images/6_Asobo_no_Sato_Kugino_Roadside_Station_道の駅_あそ望の郷くぎの.jpg",
+        "type": "custom"
       },
       {
-        "time": "18:00",
+        "time": "16:56",
         "name": "Hotel Takachiho",
         "location": {
           "lat": 32.71,
           "lng": 131.3
         },
-        "note": "",
+        "note": "這飯店榮登我這趟旅行最不愛的住宿了～覺得太貴沒有那價值，但也怪我，當初想訂的那家飯店太晚下手導致只能訂這家，讓人不開心….\n所以說，住宿還是要下好離手！",
         "photo": null,
         "type": "hotel"
+      },
+      {
+        "time": "20:49",
+        "name": "超商早餐",
+        "location": {
+          "lat": null,
+          "lng": null
+        },
+        "note": "",
+        "photo": null,
+        "type": "custom"
+      },
+      {
+        "time": "20:55",
+        "name": "不同品牌的優洛乳",
+        "location": {
+          "lat": null,
+          "lng": null
+        },
+        "note": "阿蘇牛奶品牌，🍺起來是最不甜的，而且偏酸，口感也是超級🎉，我覺得我真的很強，喝超多這類產品，大好き！！",
+        "photo": "images/6_不同品牌的優洛乳.jpg",
+        "type": "custom"
       }
     ]
   },
@@ -630,51 +663,40 @@ const TRIP_FULL_DATA = [
     "date": "",
     "timeline": [
       {
-        "time": "09:00",
+        "time": "09:43",
         "name": "高千穗峽",
         "location": {
           "lat": 32.705,
           "lng": 131.3
         },
-        "note": "",
-        "photo": null,
+        "note": "高千穗峽谷，就是要出大太陽有藍天拍照才會好看的地方啊～但是今天是陰天….\n划船最多坐三個人～於是預訂了兩艘船～有點興奮有點害怕，害怕不知道划的好不好～\n不過事實證明，我還是挺厲害的！嘿嘿\n風景很漂亮環境優美，是值得推薦來的景點，但是住宿可能就要挑一下，而且這個地區的住宿費偏高….",
+        "photo": "images/7_高千穗峽.jpg",
         "type": "spot"
       },
       {
-        "time": "12:00",
+        "time": "10:08",
         "name": "高千穗牛燒肉 和",
         "location": {
           "lat": 32.71,
           "lng": 131.305
         },
-        "note": "",
-        "photo": null,
+        "note": "11:00不到 已到店家等待，店裡有鐵板燒，燒肉，個人鐵板三種方式吃法，我選的是沙朗個人150公克鐵板，我給其他人選擇150克A5 特選牛排～\n我只能說～我現在已經無法吃這種油膩的東西了！還是肉感重的才好懷念佛羅倫斯的丁骨牛排了….",
+        "photo": "images/7_高千穗牛燒肉_和.jpg",
         "type": "food"
       },
       {
-        "time": "15:30",
+        "time": "13:45",
         "name": "水前寺成趣園",
         "location": {
           "lat": 32.79,
           "lng": 130.73
         },
-        "note": "",
-        "photo": null,
+        "note": "下午抵達時陽光☀️正溫暖著，出現藍天白雲，打開車門被太陽騙了，風大的時候還是好冷啊🥶\n日式庭園慢慢散步，餵食鴛鴦～牠們好猛，遠遠飛來搶食，可憐鯉魚都吃不到～這步調好慢好休閒",
+        "photo": "images/7_水前寺成趣園.jpg",
         "type": "spot"
       },
       {
-        "time": "16:30",
-        "name": "海賊王魯夫雕像",
-        "location": {
-          "lat": 32.795,
-          "lng": 130.74
-        },
-        "note": "",
-        "photo": null,
-        "type": "spot"
-      },
-      {
-        "time": "18:00",
+        "time": "18:09",
         "name": "三井花園飯店 熊本",
         "location": {
           "lat": 32.79,
@@ -683,6 +705,28 @@ const TRIP_FULL_DATA = [
         "note": "",
         "photo": null,
         "type": "hotel"
+      },
+      {
+        "time": "19:54",
+        "name": "熊本拉麵黑亭 櫻町熊本城前店 ",
+        "location": {
+          "lat": null,
+          "lng": null
+        },
+        "note": "",
+        "photo": "images/7_熊本拉麵黑亭_櫻町熊本城前店_.jpg",
+        "type": "custom"
+      },
+      {
+        "time": "21:53",
+        "name": "熊本城",
+        "location": {
+          "lat": null,
+          "lng": null
+        },
+        "note": "來到熊本怎麼能不來熊本城呢！還是來衝一波了，佔地超廣，而且遊客多～城堡前剛好有一顆盛開的銀杏，真是拍照最佳地點！",
+        "photo": "images/7_熊本城.jpg",
+        "type": "custom"
       }
     ]
   },
